@@ -6,15 +6,15 @@ import { PaperTradingDashboard } from './components/PaperTradingDashboard.jsx';
 import { TokenModal } from './components/TokenModal.jsx';
 import { DiscoveryCard } from './components/DiscoveryCard.jsx';
 import { LiveOpportunitiesCard } from './components/LiveOpportunitiesCard.jsx';
+import { CopyTradingTab } from './components/CopyTradingTab.jsx';
 import { useDjangoData, useBotControl, useDjangoMutations } from './hooks/useDjangoApi.js';
 import { DashboardHeader } from './components/DashboardHeader';
 import { WalletConnectButton } from './components/WalletConnectButton';
 import { WalletStatusBar } from './components/WalletStatusBar';
 import { IntelligencePanel } from './components/IntelligencePanel';
 
-// Bot Status Card Component
-// Update the BotStatusCard component capabilities:
-const BotStatusCard = ({ botData, liveOpportunities, tradingMode }) => {
+// Bot Status Card Component with Copy Trading Integration
+const BotStatusCard = ({ botData, liveOpportunities, tradingMode, copyTradingStats }) => {
     return (
         <Card className="bg-dark border-primary mb-4">
             <Card.Header className="d-flex justify-content-between align-items-center">
@@ -31,7 +31,7 @@ const BotStatusCard = ({ botData, liveOpportunities, tradingMode }) => {
                     <Col md={6}>
                         <h6 className="text-warning">Premium Capabilities</h6>
                         <ul className="list-unstyled text-light small">
-                            <li>✅ Copy Trading Intelligence (Track 15 traders)</li>
+                            <li>✅ Copy Trading Intelligence (Track {copyTradingStats?.followed_traders || 0} traders)</li>
                             <li>✅ Advanced contract bytecode analysis</li>
                             <li>✅ Real-time honeypot & rug detection</li>
                             <li>✅ Social manipulation pattern analysis</li>
@@ -47,11 +47,11 @@ const BotStatusCard = ({ botData, liveOpportunities, tradingMode }) => {
                         </div>
                         <div className="d-flex justify-content-between mb-1">
                             <span className="small">Copy Success Rate:</span>
-                            <span className="text-success small">78.5%</span>
+                            <span className="text-success small">{copyTradingStats?.win_rate_pct?.toFixed(1) || '0.0'}%</span>
                         </div>
                         <div className="d-flex justify-content-between mb-1">
                             <span className="small">Tracked Traders:</span>
-                            <span className="text-info small">15 verified</span>
+                            <span className="text-info small">{copyTradingStats?.followed_traders_count || 0} verified</span>
                         </div>
                         <div className="d-flex justify-content-between mb-1">
                             <span className="small">Connected Chains:</span>
@@ -59,7 +59,9 @@ const BotStatusCard = ({ botData, liveOpportunities, tradingMode }) => {
                         </div>
                         <div className="d-flex justify-content-between mb-1">
                             <span className="small">24h Copy Profit:</span>
-                            <span className="text-success small">+$1,250</span>
+                            <span className={`small ${parseFloat(copyTradingStats?.total_pnl_usd || 0) >= 0 ? 'text-success' : 'text-danger'}`}>
+                                ${parseFloat(copyTradingStats?.total_pnl_usd || 0).toFixed(2)}
+                            </span>
                         </div>
                         <div className="d-flex justify-content-between">
                             <span className="small">Risk Analysis:</span>
@@ -77,6 +79,7 @@ export default function App() {
     const [showTokenModal, setShowTokenModal] = useState(false);
     const [tradingMode, setTradingMode] = useState('paper');
     const [liveOpportunities, setLiveOpportunities] = useState([]);
+    const [copyTradingStats, setCopyTradingStats] = useState(null);
 
     // Django API hooks
     const {
@@ -120,6 +123,23 @@ export default function App() {
 
     const canPrev = tradesHasPrev;
     const canNext = tradesHasNext;
+
+    // Load copy trading statistics
+    useEffect(() => {
+        const loadCopyTradingStats = async () => {
+            try {
+                const response = await fetch('/api/v1/copy/status');
+                const data = await response.json();
+                setCopyTradingStats(data);
+            } catch (error) {
+                console.error('Failed to load copy trading stats:', error);
+            }
+        };
+
+        loadCopyTradingStats();
+        const interval = setInterval(loadCopyTradingStats, 60000); // Update every minute
+        return () => clearInterval(interval);
+    }, []);
 
     // Helper function for error formatting
     const fmtError = (error) => {
@@ -217,6 +237,11 @@ export default function App() {
                                 </Nav.Link>
                             </Nav.Item>
                             <Nav.Item>
+                                <Nav.Link eventKey="copy-trading">
+                                    👥 Copy Trading
+                                </Nav.Link>
+                            </Nav.Item>
+                            <Nav.Item>
                                 <Nav.Link eventKey="paper-trading">
                                     📝 Paper Trading
                                 </Nav.Link>
@@ -256,6 +281,7 @@ export default function App() {
                                             botData={botStatus}
                                             liveOpportunities={liveOpportunities}
                                             tradingMode={tradingMode}
+                                            copyTradingStats={copyTradingStats}
                                         />
                                     </Col>
                                 </Row>
@@ -362,6 +388,11 @@ export default function App() {
                                     userBalance={1000}
                                 />
                                 <LiveOpportunitiesCard />
+                            </Tab.Pane>
+
+                            {/* Copy Trading Tab - NEW */}
+                            <Tab.Pane eventKey="copy-trading">
+                                <CopyTradingTab />
                             </Tab.Pane>
 
                             {/* Paper Trading Tab - Updated with AI Thought Log */}

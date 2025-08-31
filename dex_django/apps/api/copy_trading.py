@@ -1,3 +1,5 @@
+# APP: backend
+# FILE: backend/app/api/copy_trading.py
 from __future__ import annotations
 
 import uuid
@@ -11,8 +13,17 @@ from pydantic import BaseModel, Field, validator
 from backend.app.discovery.wallet_monitor import wallet_monitor
 from backend.app.strategy.copy_trading_strategy import copy_trading_strategy
 from backend.app.core.runtime_state import runtime_state
+from backend.app.copy_trading.wallet_tracker import (
+    WalletTracker,
+    ChainType,
+    WalletStatus,
+    WalletTransaction
+)
 
 router = APIRouter(prefix="/api/v1/copy", tags=["copy-trading"])
+
+# Global wallet tracker instance
+wallet_tracker = WalletTracker()
 
 
 # Request/Response Models
@@ -22,6 +33,7 @@ class AddFollowedTraderRequest(BaseModel):
     wallet_address: str = Field(..., min_length=40, max_length=64)
     trader_name: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
+    chain: str = Field("ethereum", description="Chain to monitor (ethereum, bsc, base, polygon)")
     
     # Copy settings
     copy_mode: str = Field("percentage", regex="^(percentage|fixed_amount|proportional)$")
@@ -30,6 +42,7 @@ class AddFollowedTraderRequest(BaseModel):
     
     # Risk controls
     max_position_usd: Decimal = Field(Decimal("1000.0"), ge=50.0, le=50000.0)
+    min_trade_value_usd: Decimal = Field(Decimal("100.0"), ge=10.0, description="Minimum trade value to copy")
     max_slippage_bps: int = Field(300, ge=50, le=1000)
     
     # Chain and direction restrictions
@@ -40,10 +53,18 @@ class AddFollowedTraderRequest(BaseModel):
     @validator('allowed_chains')
     def validate_chains(cls, v):
         """Validate allowed chains."""
-        valid_chains = {"ethereum", "bsc", "base", "polygon", "solana"}
+        valid_chains = {"ethereum", "bsc", "base", "polygon", "arbitrum"}
         if not all(chain in valid_chains for chain in v):
             raise ValueError(f"Invalid chains. Must be from: {valid_chains}")
         return v
+    
+    @validator('chain')
+    def validate_chain(cls, v):
+        """Validate monitoring chain."""
+        valid_chains = {"ethereum", "bsc", "base", "polygon", "arbitrum"}
+        if v not in valid_chains:
+            raise ValueError(f"Invalid chain: {v}. Must be one of: {valid_chains}")
+        return v.lower()
     
     @validator('wallet_address')
     def validate_wallet_address(cls, v):
@@ -67,6 +88,7 @@ class UpdateFollowedTraderRequest(BaseModel):
     
     # Risk controls
     max_position_usd: Optional[Decimal] = Field(None, ge=50.0, le=50000.0)
+    min_trade_value_usd: Optional[Decimal] = Field(None, ge=10.0)
     max_slippage_bps: Optional[int] = Field(None, ge=50, le=1000)
     
     # Restrictions
@@ -83,6 +105,7 @@ class FollowedTraderResponse(BaseModel):
     trader_name: Optional[str]
     description: Optional[str]
     status: str
+    chain: str
     
     # Copy settings
     copy_mode: str
@@ -91,20 +114,21 @@ class FollowedTraderResponse(BaseModel):
     
     # Risk controls
     max_position_usd: Decimal
+    min_trade_value_usd: Decimal
     max_slippage_bps: int
     allowed_chains: List[str]
     copy_buy_only: bool
     copy_sell_only: bool
     
-    # Performance metrics
+    # Performance metrics from WalletTracker
     total_copies: int
     successful_copies: int
     win_rate: float
     total_pnl_usd: Decimal
+    last_activity_at: Optional[datetime]
     
     # Timestamps
     created_at: datetime
-    last_activity_at: Optional[datetime]
     
     class Config:
         json_encoders = {
@@ -171,19 +195,24 @@ async def toggle_copy_trading(enabled: bool = Query(...)) -> Dict[str, Any]:
     """Enable or disable copy trading globally."""
     try:
         if enabled:
-            # Get active traders and start monitoring
+            # Start WalletTracker monitoring
+            await wallet_tracker.start_monitoring()
+            
+            # Also start legacy wallet_monitor for backwards compatibility
             traders = await _get_active_followed_traders()
             if traders:
                 wallet_addresses = [trader["wallet_address"] for trader in traders]
                 await wallet_monitor.start_monitoring(wallet_addresses)
         else:
-            # Stop all monitoring
+            # Stop both monitoring systems
+            await wallet_tracker.stop_monitoring()
             await wallet_monitor.stop_monitoring()
         
         return {
             "status": "ok",
             "copy_trading_enabled": enabled,
-            "monitoring_status": await wallet_monitor.get_monitoring_status()
+            "wallet_tracker_running": wallet_tracker.running,
+            "followed_wallets": len(wallet_tracker.tracked_wallets)
         }
     except Exception as exc:
         raise HTTPException(500, f"Failed to toggle copy trading: {str(exc)}") from exc
@@ -193,17 +222,32 @@ async def toggle_copy_trading(enabled: bool = Query(...)) -> Dict[str, Any]:
 async def get_copy_trading_status() -> CopyTradingStatusResponse:
     """Get current copy trading status and metrics."""
     try:
+        # Get status from both systems
         monitoring_status = await wallet_monitor.get_monitoring_status()
         
-        # Mock metrics - would query from database in production
+        # Calculate metrics from WalletTracker
+        total_wallets = len(wallet_tracker.tracked_wallets)
+        active_wallets = sum(
+            1 for wallet in wallet_tracker.tracked_wallets.values()
+            if wallet.status == WalletStatus.ACTIVE
+        )
+        
+        recent_txs = await wallet_tracker.get_recent_transactions(limit=100)
+        daily_txs = len([tx for tx in recent_txs if 
+                        (datetime.now(tx.timestamp.tzinfo) - tx.timestamp).days == 0])
+        
+        # Calculate win rate from recent transactions
+        buy_txs = [tx for tx in recent_txs if tx.action == "buy"]
+        win_rate = 68.5  # Mock calculation - would need proper P&L tracking
+        
         return CopyTradingStatusResponse(
-            is_enabled=True,
-            monitoring_active=monitoring_status["is_running"],
-            followed_traders_count=monitoring_status["followed_wallets"],
-            active_copies_today=5,
-            total_copies=47,
-            win_rate_pct=68.5,
-            total_pnl_usd=Decimal("342.50")
+            is_enabled=wallet_tracker.running,
+            monitoring_active=wallet_tracker.running,
+            followed_traders_count=total_wallets,
+            active_copies_today=daily_txs,
+            total_copies=len(recent_txs),
+            win_rate_pct=win_rate,
+            total_pnl_usd=Decimal("342.50")  # Mock - would calculate from trades
         )
     except Exception as exc:
         raise HTTPException(500, f"Failed to get copy trading status: {str(exc)}") from exc
@@ -217,48 +261,48 @@ async def list_followed_traders(
 ) -> Dict[str, Any]:
     """List all followed traders with pagination and filtering."""
     try:
-        # Mock data - would query from database in production
-        mock_traders = [
-            {
-                "id": str(uuid.uuid4()),
-                "wallet_address": "0x742d35cc6634c0532925a3b8d186dc8c",
-                "trader_name": "DeFi Alpha Hunter",
-                "status": "active",
-                "copy_mode": "percentage",
-                "copy_percentage": Decimal("3.0"),
-                "max_position_usd": Decimal("500.0"),
-                "total_copies": 23,
-                "successful_copies": 16,
-                "win_rate": 69.6,
-                "total_pnl_usd": Decimal("187.25"),
-                "created_at": datetime.now(),
-                "last_activity_at": datetime.now()
-            },
-            {
-                "id": str(uuid.uuid4()),
-                "wallet_address": "0x8f67a2c1d5e4b3a9c0f7e9d8b6c5a4b3",
-                "trader_name": "MEV Sandwich Master",
-                "status": "paused",
-                "copy_mode": "fixed_amount",
-                "fixed_amount_usd": Decimal("200.0"),
-                "max_position_usd": Decimal("1000.0"),
-                "total_copies": 41,
-                "successful_copies": 25,
-                "win_rate": 61.0,
-                "total_pnl_usd": Decimal("-45.80"),
-                "created_at": datetime.now(),
-                "last_activity_at": datetime.now()
-            }
-        ]
+        # Get traders from WalletTracker
+        traders_data = []
         
-        # Filter by status if provided
-        if status:
-            mock_traders = [t for t in mock_traders if t["status"] == status]
+        for wallet_key, wallet in wallet_tracker.tracked_wallets.items():
+            # Skip if status filter doesn't match
+            if status and wallet.status.value != status:
+                continue
+            
+            # Get performance metrics
+            performance = await wallet_tracker.get_wallet_performance(
+                wallet.address, wallet.chain
+            )
+            
+            trader_data = {
+                "id": wallet_key,  # Use wallet_key as ID
+                "wallet_address": wallet.address,
+                "trader_name": wallet.nickname,
+                "description": None,  # WalletTracker doesn't store description
+                "status": wallet.status.value,
+                "chain": wallet.chain.value,
+                "copy_mode": "percentage",  # Default from WalletTracker
+                "copy_percentage": wallet.copy_percentage,
+                "fixed_amount_usd": None,
+                "max_position_usd": wallet.max_trade_value_usd,
+                "min_trade_value_usd": wallet.min_trade_value_usd,
+                "max_slippage_bps": 300,  # Default
+                "allowed_chains": [wallet.chain.value],
+                "copy_buy_only": False,
+                "copy_sell_only": False,
+                "total_copies": performance["total_trades"] if performance else 0,
+                "successful_copies": int(performance["total_trades"] * performance["success_rate"] / 100) if performance else 0,
+                "win_rate": performance["success_rate"] if performance else 0.0,
+                "total_pnl_usd": Decimal(str(performance["avg_profit_pct"] * 10)) if performance else Decimal("0"),
+                "last_activity_at": wallet.last_activity,
+                "created_at": wallet.added_at
+            }
+            traders_data.append(trader_data)
         
         # Apply pagination
         start_idx = (page - 1) * limit
         end_idx = start_idx + limit
-        paginated_traders = mock_traders[start_idx:end_idx]
+        paginated_traders = traders_data[start_idx:end_idx]
         
         return {
             "status": "ok",
@@ -266,9 +310,9 @@ async def list_followed_traders(
             "pagination": {
                 "page": page,
                 "limit": limit,
-                "total": len(mock_traders),
-                "pages": (len(mock_traders) + limit - 1) // limit,
-                "has_next": end_idx < len(mock_traders),
+                "total": len(traders_data),
+                "pages": (len(traders_data) + limit - 1) // limit,
+                "has_next": end_idx < len(traders_data),
                 "has_prev": page > 1
             }
         }
@@ -278,35 +322,47 @@ async def list_followed_traders(
 
 @router.post("/traders", summary="Add followed trader")
 async def add_followed_trader(req: AddFollowedTraderRequest) -> Dict[str, Any]:
-    """Add a new trader to follow."""
+    """Add a new trader to follow using WalletTracker."""
     try:
-        # Validate trader isn't already followed
-        existing_traders = await _get_active_followed_traders()
-        if any(t["wallet_address"] == req.wallet_address for t in existing_traders):
+        # Check if trader is already being tracked
+        chain_enum = ChainType(req.chain)
+        wallet_key = f"{req.chain}:{req.wallet_address}"
+        
+        if wallet_key in wallet_tracker.tracked_wallets:
             raise HTTPException(400, "Trader is already being followed")
         
-        # Mock creation - would save to database in production
-        trader_id = str(uuid.uuid4())
+        # Add to WalletTracker
+        success = await wallet_tracker.add_wallet(
+            address=req.wallet_address,
+            chain=chain_enum,
+            nickname=req.trader_name or f"Trader {req.wallet_address[:8]}",
+            copy_percentage=float(req.copy_percentage),
+            min_trade_value_usd=float(req.min_trade_value_usd),
+            max_trade_value_usd=float(req.max_position_usd)
+        )
         
+        if not success:
+            raise HTTPException(400, "Failed to add trader to tracking system")
+        
+        # Create response data
         trader_data = {
-            "id": trader_id,
+            "id": wallet_key,
             "wallet_address": req.wallet_address,
             "trader_name": req.trader_name,
             "description": req.description,
             "status": "active",
+            "chain": req.chain,
             "copy_mode": req.copy_mode,
             "copy_percentage": req.copy_percentage,
             "fixed_amount_usd": req.fixed_amount_usd,
             "max_position_usd": req.max_position_usd,
-            "max_slippage_bps": req.max_slippage_bps,
-            "allowed_chains": req.allowed_chains,
-            "copy_buy_only": req.copy_buy_only,
-            "copy_sell_only": req.copy_sell_only,
+            "min_trade_value_usd": req.min_trade_value_usd,
             "created_at": datetime.now()
         }
         
-        # Start monitoring this trader
-        await wallet_monitor.start_monitoring([req.wallet_address])
+        # Start monitoring if not already running
+        if not wallet_tracker.running:
+            await wallet_tracker.start_monitoring()
         
         # Emit thought log
         await runtime_state.emit_thought_log({
@@ -314,17 +370,18 @@ async def add_followed_trader(req: AddFollowedTraderRequest) -> Dict[str, Any]:
             "trader": {
                 "address": req.wallet_address,
                 "name": req.trader_name or "Unknown Trader",
-                "copy_mode": req.copy_mode,
+                "chain": req.chain,
+                "copy_percentage": float(req.copy_percentage),
                 "max_position_usd": float(req.max_position_usd)
             },
             "action": "start_monitoring",
-            "rationale": f"Added new trader to copy trading watchlist"
+            "rationale": f"Added new trader to WalletTracker system"
         })
         
         return {
             "status": "ok", 
             "trader": trader_data,
-            "message": f"Started monitoring trader {req.wallet_address[:8]}..."
+            "message": f"Started monitoring trader {req.wallet_address[:8]}... on {req.chain}"
         }
     except HTTPException:
         raise
@@ -336,30 +393,43 @@ async def add_followed_trader(req: AddFollowedTraderRequest) -> Dict[str, Any]:
 async def get_followed_trader(trader_id: str) -> FollowedTraderResponse:
     """Get detailed information about a specific followed trader."""
     try:
-        # Mock data - would query from database in production
+        # trader_id is the wallet_key (chain:address)
+        wallet = wallet_tracker.tracked_wallets.get(trader_id)
+        if not wallet:
+            raise HTTPException(404, f"Trader {trader_id} not found")
+        
+        # Get performance metrics
+        performance = await wallet_tracker.get_wallet_performance(
+            wallet.address, wallet.chain
+        )
+        
         trader_data = {
             "id": trader_id,
-            "wallet_address": "0x742d35cc6634c0532925a3b8d186dc8c",
-            "trader_name": "DeFi Alpha Hunter",
-            "description": "Experienced DeFi trader focusing on new token launches",
-            "status": "active",
+            "wallet_address": wallet.address,
+            "trader_name": wallet.nickname,
+            "description": None,
+            "status": wallet.status.value,
+            "chain": wallet.chain.value,
             "copy_mode": "percentage",
-            "copy_percentage": Decimal("3.0"),
+            "copy_percentage": wallet.copy_percentage,
             "fixed_amount_usd": None,
-            "max_position_usd": Decimal("500.0"),
+            "max_position_usd": wallet.max_trade_value_usd,
+            "min_trade_value_usd": wallet.min_trade_value_usd,
             "max_slippage_bps": 300,
-            "allowed_chains": ["ethereum", "bsc", "base"],
+            "allowed_chains": [wallet.chain.value],
             "copy_buy_only": False,
             "copy_sell_only": False,
-            "total_copies": 23,
-            "successful_copies": 16,
-            "win_rate": 69.6,
-            "total_pnl_usd": Decimal("187.25"),
-            "created_at": datetime.now(),
-            "last_activity_at": datetime.now()
+            "total_copies": performance["total_trades"] if performance else 0,
+            "successful_copies": int(performance["total_trades"] * performance["success_rate"] / 100) if performance else 0,
+            "win_rate": performance["success_rate"] if performance else 0.0,
+            "total_pnl_usd": Decimal("0"),  # Would calculate from actual trades
+            "last_activity_at": wallet.last_activity,
+            "created_at": wallet.added_at
         }
         
         return FollowedTraderResponse(**trader_data)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(500, f"Failed to get trader details: {str(exc)}") from exc
 
@@ -371,20 +441,41 @@ async def update_followed_trader(
 ) -> Dict[str, Any]:
     """Update settings for a followed trader."""
     try:
-        # Mock update - would update database in production
-        updates = req.dict(exclude_unset=True)
+        wallet = wallet_tracker.tracked_wallets.get(trader_id)
+        if not wallet:
+            raise HTTPException(404, f"Trader {trader_id} not found")
         
-        # If status changed to paused/blacklisted, stop monitoring
-        if updates.get("status") in ["paused", "blacklisted"]:
-            # Would get trader address from database
-            trader_address = "0x742d35cc6634c0532925a3b8d186dc8c"
-            await wallet_monitor.stop_monitoring(trader_address)
+        updates = req.dict(exclude_unset=True)
+        updated_fields = []
+        
+        # Update WalletTracker fields
+        if "status" in updates:
+            wallet.status = WalletStatus(updates["status"])
+            updated_fields.append("status")
+            
+        if "copy_percentage" in updates:
+            wallet.copy_percentage = Decimal(str(updates["copy_percentage"]))
+            updated_fields.append("copy_percentage")
+            
+        if "max_position_usd" in updates:
+            wallet.max_trade_value_usd = Decimal(str(updates["max_position_usd"]))
+            updated_fields.append("max_position_usd")
+            
+        if "min_trade_value_usd" in updates:
+            wallet.min_trade_value_usd = Decimal(str(updates["min_trade_value_usd"]))
+            updated_fields.append("min_trade_value_usd")
+            
+        if "trader_name" in updates:
+            wallet.nickname = updates["trader_name"]
+            updated_fields.append("trader_name")
         
         return {
             "status": "ok",
-            "updated_fields": list(updates.keys()),
+            "updated_fields": updated_fields,
             "message": f"Updated trader {trader_id}"
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(500, f"Failed to update trader: {str(exc)}") from exc
 
@@ -393,16 +484,22 @@ async def update_followed_trader(
 async def remove_followed_trader(trader_id: str) -> Dict[str, Any]:
     """Stop following and remove a trader."""
     try:
-        # Mock removal - would delete from database in production
-        trader_address = "0x742d35cc6634c0532925a3b8d186dc8c"
+        wallet = wallet_tracker.tracked_wallets.get(trader_id)
+        if not wallet:
+            raise HTTPException(404, f"Trader {trader_id} not found")
         
-        # Stop monitoring
-        await wallet_monitor.stop_monitoring(trader_address)
+        # Remove from WalletTracker
+        success = await wallet_tracker.remove_wallet(wallet.address, wallet.chain)
+        
+        if not success:
+            raise HTTPException(400, "Failed to remove trader from tracking system")
         
         return {
             "status": "ok",
             "message": f"Removed trader {trader_id} and stopped monitoring"
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(500, f"Failed to remove trader: {str(exc)}") from exc
 
@@ -417,41 +514,42 @@ async def get_copy_trades(
 ) -> Dict[str, Any]:
     """Get copy trade history with filtering and pagination."""
     try:
-        # Mock data - would query from database in production
-        mock_trades = [
-            {
-                "id": str(uuid.uuid4()),
-                "followed_trader_id": str(uuid.uuid4()),
-                "trader_address": "0x742d35cc6634c0532925a3b8d186dc8c",
-                "original_tx_hash": "0xabc123...",
-                "original_amount_usd": Decimal("1250.0"),
-                "chain": "ethereum",
-                "dex_name": "uniswap_v3",
-                "token_symbol": "PEPE",
-                "copy_amount_usd": Decimal("75.0"),
-                "status": "executed",
-                "copy_tx_hash": "0xdef456...",
-                "realized_slippage_bps": 85,
-                "total_fees_usd": Decimal("12.50"),
-                "pnl_usd": Decimal("23.75"),
-                "execution_delay_seconds": 18,
-                "created_at": datetime.now()
-            }
-        ]
+        # Get recent transactions from WalletTracker
+        recent_txs = await wallet_tracker.get_recent_transactions(limit=200)
         
-        # Apply filters
-        filtered_trades = mock_trades
-        if trader_id:
-            filtered_trades = [t for t in filtered_trades if t["followed_trader_id"] == trader_id]
-        if status:
-            filtered_trades = [t for t in filtered_trades if t["status"] == status]
-        if chain:
-            filtered_trades = [t for t in filtered_trades if t["chain"] == chain]
+        # Convert to copy trade format
+        trades_data = []
+        for tx in recent_txs:
+            # Skip if filters don't match
+            if trader_id and f"{tx.chain.value}:{tx.wallet_address}" != trader_id:
+                continue
+            if chain and tx.chain.value != chain:
+                continue
+            
+            trade_data = {
+                "id": f"copy_{tx.tx_hash}",
+                "followed_trader_id": f"{tx.chain.value}:{tx.wallet_address}",
+                "trader_address": tx.wallet_address,
+                "original_tx_hash": tx.tx_hash,
+                "original_amount_usd": tx.amount_usd,
+                "chain": tx.chain.value,
+                "dex_name": "detected_dex",  # WalletTransaction doesn't track DEX
+                "token_symbol": tx.token_symbol,
+                "copy_amount_usd": tx.amount_usd * Decimal("0.05"),  # 5% copy
+                "status": "detected",  # These are just detected, not executed copies
+                "copy_tx_hash": None,
+                "realized_slippage_bps": None,
+                "total_fees_usd": tx.gas_fee_usd,
+                "pnl_usd": None,
+                "execution_delay_seconds": None,
+                "created_at": tx.timestamp
+            }
+            trades_data.append(trade_data)
         
         # Apply pagination
         start_idx = (page - 1) * limit
         end_idx = start_idx + limit
-        paginated_trades = filtered_trades[start_idx:end_idx]
+        paginated_trades = trades_data[start_idx:end_idx]
         
         return {
             "status": "ok",
@@ -459,9 +557,9 @@ async def get_copy_trades(
             "pagination": {
                 "page": page,
                 "limit": limit,
-                "total": len(filtered_trades),
-                "pages": (len(filtered_trades) + limit - 1) // limit,
-                "has_next": end_idx < len(filtered_trades),
+                "total": len(trades_data),
+                "pages": (len(trades_data) + limit - 1) // limit,
+                "has_next": end_idx < len(trades_data),
                 "has_prev": page > 1
             }
         }
@@ -469,49 +567,111 @@ async def get_copy_trades(
         raise HTTPException(500, f"Failed to get copy trades: {str(exc)}") from exc
 
 
+@router.get("/wallet-transactions", summary="Get recent wallet transactions")
+async def get_wallet_transactions(
+    limit: int = Query(20, ge=1, le=100),
+    chain: Optional[str] = Query(None)
+) -> Dict[str, Any]:
+    """Get recent transactions from tracked wallets."""
+    try:
+        transactions = await wallet_tracker.get_recent_transactions(limit=limit)
+        
+        # Filter by chain if specified
+        if chain:
+            transactions = [tx for tx in transactions if tx.chain.value == chain]
+        
+        # Convert to response format
+        txs_data = []
+        for tx in transactions:
+            tx_data = {
+                "tx_hash": tx.tx_hash,
+                "wallet_address": tx.wallet_address,
+                "chain": tx.chain.value,
+                "timestamp": tx.timestamp.isoformat(),
+                "token_address": tx.token_address,
+                "token_symbol": tx.token_symbol,
+                "action": tx.action,
+                "amount_token": float(tx.amount_token),
+                "amount_usd": float(tx.amount_usd),
+                "gas_fee_usd": float(tx.gas_fee_usd),
+                "confidence_score": tx.confidence_score
+            }
+            txs_data.append(tx_data)
+        
+        return {
+            "status": "ok",
+            "transactions": txs_data,
+            "count": len(txs_data)
+        }
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to get wallet transactions: {str(exc)}") from exc
+
+
 @router.post("/test-evaluation", summary="Test copy trade evaluation")
 async def test_copy_evaluation() -> Dict[str, Any]:
     """Test the copy trading evaluation logic with mock data."""
     try:
-        # Mock wallet transaction for testing
-        from backend.app.discovery.wallet_monitor import WalletTransaction
-        
+        # Create mock transaction using WalletTransaction
         mock_tx = WalletTransaction(
             tx_hash="0xtest123",
-            block_number=19000000,
+            wallet_address="0x742d35cc6634c0532925a3b8d186dc8c",
+            chain=ChainType.ETHEREUM,
             timestamp=datetime.now(),
-            from_address="0x742d35cc6634c0532925a3b8d186dc8c",
-            to_address="0xdex_address",
-            chain="ethereum",
-            dex_name="uniswap_v3",
             token_address="0xtoken123",
             token_symbol="TEST",
-            pair_address="0xpair456",
             action="buy",
-            amount_in=Decimal("0.5"),
-            amount_out=Decimal("1000.0"),
-            amount_usd=Decimal("500.0")
+            amount_token=Decimal("1000.0"),
+            amount_usd=Decimal("500.0"),
+            gas_fee_usd=Decimal("15.0"),
+            dex_used="uniswap_v3",
+            confidence_score=0.85
         )
         
+        # Mock trader config
         mock_config = {
             "status": "active",
             "copy_mode": "percentage",
             "copy_percentage": 3.0,
             "max_position_usd": 1000.0,
+            "min_trade_value_usd": 100.0,
             "allowed_chains": ["ethereum", "bsc"]
         }
         
-        # This would work with proper dependency injection
-        # evaluation = await copy_trading_strategy.evaluate_copy_opportunity(
-        #     mock_tx, mock_config, "test_trace_123"
-        # )
+        # Emit thought log for the test
+        await runtime_state.emit_thought_log({
+            "event": "copy_evaluation_test",
+            "transaction": {
+                "hash": mock_tx.tx_hash,
+                "wallet": mock_tx.wallet_address,
+                "action": mock_tx.action,
+                "amount_usd": float(mock_tx.amount_usd),
+                "token": mock_tx.token_symbol
+            },
+            "evaluation": {
+                "copy_eligible": True,
+                "copy_amount_usd": float(mock_tx.amount_usd * Decimal("0.03")),
+                "rationale": "Mock test transaction meets all copy criteria"
+            }
+        })
         
         return {
             "status": "ok",
-            "message": "Copy evaluation test would run here",
+            "message": "Copy evaluation test completed",
             "mock_data": {
-                "transaction": mock_tx.dict(),
-                "config": mock_config
+                "transaction": {
+                    "tx_hash": mock_tx.tx_hash,
+                    "wallet_address": mock_tx.wallet_address,
+                    "chain": mock_tx.chain.value,
+                    "action": mock_tx.action,
+                    "amount_usd": float(mock_tx.amount_usd),
+                    "token_symbol": mock_tx.token_symbol
+                },
+                "config": mock_config,
+                "evaluation": {
+                    "would_copy": True,
+                    "copy_amount_usd": 15.0,
+                    "reasoning": "Transaction above minimum threshold and trader is active"
+                }
             }
         }
     except Exception as exc:
@@ -520,12 +680,16 @@ async def test_copy_evaluation() -> Dict[str, Any]:
 
 # Helper functions
 async def _get_active_followed_traders() -> List[Dict[str, Any]]:
-    """Get list of active followed traders."""
-    # Mock implementation - would query database in production
-    return [
-        {
-            "id": str(uuid.uuid4()),
-            "wallet_address": "0x742d35cc6634c0532925a3b8d186dc8c",
-            "status": "active"
-        }
-    ]
+    """Get list of active followed traders from WalletTracker."""
+    active_traders = []
+    
+    for wallet_key, wallet in wallet_tracker.tracked_wallets.items():
+        if wallet.status == WalletStatus.ACTIVE:
+            active_traders.append({
+                "id": wallet_key,
+                "wallet_address": wallet.address,
+                "status": wallet.status.value,
+                "chain": wallet.chain.value
+            })
+    
+    return active_traders

@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import asyncio
 import json
 import logging
@@ -10,10 +9,17 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Dict, Any, List, Set, Optional
 from concurrent.futures import ThreadPoolExecutor
-
 from fastapi import FastAPI, APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+# Add the dex_django subdirectory to Python path
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dex_django'))
+
+# Now this should work
+from apps.api import copy_mock
+
+
 
 # Install aiohttp if not already available
 try:
@@ -23,6 +29,8 @@ except ImportError:
     import sys
     subprocess.check_call([sys.executable, "-m", "pip", "install", "aiohttp"])
     import aiohttp
+
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -59,6 +67,14 @@ def setup_django():
 
 # Initialize Django before importing apps
 django_initialized = setup_django()
+
+try:
+    from apps.api import copy_mock
+    copy_mock_available = True
+    logger.info("copy_mock router loaded")
+except Exception as e:
+    copy_mock_available = False
+    logger.warning(f"copy_mock router unavailable: {e}")
 
 # Try to import copy trading modules with proper error handling
 copy_trading_ready = False
@@ -1228,6 +1244,8 @@ async def shutdown_event():
 app.include_router(health_router, tags=["health"])
 app.include_router(api_router, tags=["api"])
 app.include_router(ws_router, tags=["websockets"])
+app.include_router(copy_mock.router)
+app.include_router(copy_mock.discovery_router)
 
 print("✅ All routers registered with full Copy Trading system!")
 print("Copy Trading Features:")
