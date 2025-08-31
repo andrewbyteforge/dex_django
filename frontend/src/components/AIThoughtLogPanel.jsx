@@ -55,7 +55,7 @@ const ThoughtFrame = ({ frame }) => {
                     </small>
                 </div>
                 <Badge bg={frame.log_type === 'decision' ? 'info' : 'secondary'}>
-                    {frame.log_type.replace('_', ' ').toUpperCase()}
+                    (frame.log_type || 'thought').replace(/_/g, ' ')
                 </Badge>
             </Card.Header>
 

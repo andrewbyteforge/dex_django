@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { Card, Button, Table, Badge, Alert, Spinner, Modal } from 'react-bootstrap';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Card, Button, Table, Badge, Alert, Spinner, Modal, Form, Row, Col, ButtonGroup, Pagination } from 'react-bootstrap';
 import { useDjangoData, djangoApi } from '../hooks/useDjangoApi';
 
 export function LiveOpportunitiesCard() {
@@ -10,6 +10,20 @@ export function LiveOpportunitiesCard() {
     const [analysisResult, setAnalysisResult] = useState(null);
     const [showAnalysisModal, setShowAnalysisModal] = useState(false);
     const refreshIntervalRef = useRef(null);
+
+    // Filter states
+    const [filters, setFilters] = useState({
+        minScore: 0,
+        maxScore: 30,
+        minLiquidity: 0,
+        maxLiquidity: 1000000,
+        selectedChains: new Set(['ethereum', 'bsc', 'base', 'polygon', 'solana']),
+        selectedSources: new Set(['dexscreener', 'coingecko_trending', 'jupiter'])
+    });
+
+    // Pagination states
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(20);
 
     const {
         data: opportunitiesData,
@@ -23,7 +37,44 @@ export function LiveOpportunitiesCard() {
         refresh: refreshStats
     } = useDjangoData('/api/v1/opportunities/stats', {});
 
-    const opportunities = opportunitiesData?.opportunities || [];
+    const rawOpportunities = opportunitiesData?.opportunities || [];
+
+    // Filter and sort opportunities (latest first, then by score)
+    const filteredOpportunities = useMemo(() => {
+        return rawOpportunities.filter(opp => {
+            const score = opp.opportunity_score || 0;
+            const liquidity = opp.estimated_liquidity_usd || 0;
+            const chain = opp.chain || 'unknown';
+            const source = opp.source || 'unknown';
+
+            return (
+                score >= filters.minScore &&
+                score <= filters.maxScore &&
+                liquidity >= filters.minLiquidity &&
+                liquidity <= filters.maxLiquidity &&
+                filters.selectedChains.has(chain) &&
+                filters.selectedSources.has(source)
+            );
+        }).sort((a, b) => {
+            // Sort by timestamp first (latest first), then by score (highest first)
+            const timeA = new Date(a.timestamp || 0).getTime();
+            const timeB = new Date(b.timestamp || 0).getTime();
+            if (timeB !== timeA) {
+                return timeB - timeA; // Latest first
+            }
+            return (b.opportunity_score || 0) - (a.opportunity_score || 0); // Then by score
+        });
+    }, [rawOpportunities, filters]);
+
+    // Paginate opportunities
+    const totalPages = Math.ceil(filteredOpportunities.length / itemsPerPage);
+    const paginatedOpportunities = useMemo(() => {
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        const endIndex = startIndex + itemsPerPage;
+        return filteredOpportunities.slice(startIndex, endIndex);
+    }, [filteredOpportunities, currentPage, itemsPerPage]);
+
+    const opportunities = paginatedOpportunities;
 
     // Auto-refresh mechanism
     useEffect(() => {
@@ -52,21 +103,71 @@ export function LiveOpportunitiesCard() {
         await Promise.all([refresh(), refreshStats()]);
     };
 
+    const handleFilterChange = (filterType, value) => {
+        setFilters(prev => ({
+            ...prev,
+            [filterType]: value
+        }));
+    };
+
+    const handleChainToggle = (chain) => {
+        setFilters(prev => {
+            const newChains = new Set(prev.selectedChains);
+            if (newChains.has(chain)) {
+                newChains.delete(chain);
+            } else {
+                newChains.add(chain);
+            }
+            return { ...prev, selectedChains: newChains };
+        });
+    };
+
+    const handleSourceToggle = (source) => {
+        setFilters(prev => {
+            const newSources = new Set(prev.selectedSources);
+            if (newSources.has(source)) {
+                newSources.delete(source);
+            } else {
+                newSources.add(source);
+            }
+            return { ...prev, selectedSources: newSources };
+        });
+    };
+
+    const resetFilters = () => {
+        setFilters({
+            minScore: 0,
+            maxScore: 30,
+            minLiquidity: 0,
+            maxLiquidity: 1000000,
+            selectedChains: new Set(['ethereum', 'bsc', 'base', 'polygon', 'solana']),
+            selectedSources: new Set(['dexscreener', 'coingecko_trending', 'jupiter'])
+        });
+        setCurrentPage(1); // Reset to first page when filters change
+    };
+
+    // Reset to page 1 when filters change
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [filters]);
+
+    const handlePageChange = (page) => {
+        setCurrentPage(Math.max(1, Math.min(page, totalPages)));
+    };
+
+    const handleItemsPerPageChange = (newItemsPerPage) => {
+        setItemsPerPage(newItemsPerPage);
+        setCurrentPage(1);
+    };
+
     const analyzeOpportunity = async (opportunity) => {
         console.log('Analyze button clicked for:', opportunity.pair_address);
-
-        // Set state immediately to show modal
         setSelectedOpportunity(opportunity);
         setAnalyzing(true);
         setAnalysisResult(null);
         setShowAnalysisModal(true);
 
-        console.log('Modal should be visible now, showAnalysisModal:', true);
-
         try {
-            console.log('Making analysis request with opportunity:', opportunity);
-
-            // Ensure all required fields are present
             const requestData = {
                 pair_address: opportunity.pair_address || '',
                 chain: opportunity.chain || 'ethereum',
@@ -80,15 +181,10 @@ export function LiveOpportunitiesCard() {
                 trade_amount_eth: 0.1
             };
 
-            console.log('Sending request data:', requestData);
-
             const response = await djangoApi.post('/api/v1/opportunities/analyze', requestData);
-
-            console.log('Analysis response:', response.data);
             setAnalysisResult(response.data.analysis || response.data);
         } catch (err) {
             console.error('Analysis failed:', err);
-            console.error('Error response:', err.response?.data);
             setAnalysisResult({
                 error: err.response?.data?.error || err.message || 'Analysis failed'
             });
@@ -98,7 +194,6 @@ export function LiveOpportunitiesCard() {
     };
 
     const closeModal = () => {
-        console.log('Closing modal');
         setShowAnalysisModal(false);
         setSelectedOpportunity(null);
         setAnalysisResult(null);
@@ -121,16 +216,6 @@ export function LiveOpportunitiesCard() {
         }
     };
 
-    // Debug: Log modal state changes
-    useEffect(() => {
-        console.log('Modal state changed:', {
-            showAnalysisModal,
-            selectedOpportunity: selectedOpportunity?.pair_address,
-            analyzing,
-            hasResult: !!analysisResult
-        });
-    }, [showAnalysisModal, selectedOpportunity, analyzing, analysisResult]);
-
     return (
         <>
             <Card className="mb-4">
@@ -138,28 +223,33 @@ export function LiveOpportunitiesCard() {
                     <div className="d-flex align-items-center gap-2">
                         <strong>Live Opportunities</strong>
                         <Badge bg="info">
-                            {opportunities.length || 0} found
+                            {opportunities.length} showing
                         </Badge>
+                        {opportunities.length !== filteredOpportunities.length && (
+                            <Badge bg="secondary">
+                                of {filteredOpportunities.length} filtered
+                            </Badge>
+                        )}
+                        {filteredOpportunities.length !== rawOpportunities.length && (
+                            <Badge bg="outline-secondary">
+                                ({rawOpportunities.length} total)
+                            </Badge>
+                        )}
                     </div>
                     <div className="d-flex align-items-center gap-2">
                         <small className="text-muted">
-                            {lastUpdate ? `Updated ${formatTimeAgo(lastUpdate)}` : 'Loading...'}
+                            {lastUpdate ? formatTimeAgo(lastUpdate) : 'Never updated'}
                         </small>
-                        <div className="form-check form-switch">
-                            <input
-                                className="form-check-input"
-                                type="checkbox"
-                                id="autoRefresh"
-                                checked={autoRefresh}
-                                onChange={(e) => setAutoRefresh(e.target.checked)}
-                            />
-                            <label className="form-check-label small" htmlFor="autoRefresh">
-                                Auto-refresh
-                            </label>
-                        </div>
+                        <Form.Check
+                            type="switch"
+                            id="auto-refresh"
+                            label="Auto"
+                            checked={autoRefresh}
+                            onChange={(e) => setAutoRefresh(e.target.checked)}
+                        />
                         <Button
-                            size="sm"
                             variant="outline-primary"
+                            size="sm"
                             onClick={handleManualRefresh}
                             disabled={loading}
                         >
@@ -187,25 +277,202 @@ export function LiveOpportunitiesCard() {
                         </Alert>
                     )}
 
+                    {/* Filter Controls */}
+                    <Card className="mb-3 bg-light">
+                        <Card.Body className="py-2">
+                            <div className="d-flex justify-content-between align-items-center mb-2">
+                                <small className="fw-bold text-muted">FILTERS</small>
+                                <Button size="sm" variant="outline-secondary" onClick={resetFilters}>
+                                    Reset All
+                                </Button>
+                            </div>
+
+                            <Row>
+                                {/* Score Range Slider */}
+                                <Col md={3}>
+                                    <Form.Group>
+                                        <Form.Label className="small mb-1">
+                                            Score: {filters.minScore} - {filters.maxScore}
+                                        </Form.Label>
+                                        <div className="d-flex gap-2">
+                                            <Form.Range
+                                                min={0}
+                                                max={30}
+                                                value={filters.minScore}
+                                                onChange={(e) => handleFilterChange('minScore', Number(e.target.value))}
+                                                className="flex-grow-1"
+                                            />
+                                            <Form.Range
+                                                min={0}
+                                                max={30}
+                                                value={filters.maxScore}
+                                                onChange={(e) => handleFilterChange('maxScore', Number(e.target.value))}
+                                                className="flex-grow-1"
+                                            />
+                                        </div>
+                                    </Form.Group>
+                                </Col>
+
+                                {/* Liquidity Range Slider */}
+                                <Col md={3}>
+                                    <Form.Group>
+                                        <Form.Label className="small mb-1">
+                                            Liquidity: ${(filters.minLiquidity / 1000).toFixed(0)}K - ${(filters.maxLiquidity / 1000).toFixed(0)}K
+                                        </Form.Label>
+                                        <div className="d-flex gap-2">
+                                            <Form.Range
+                                                min={0}
+                                                max={1000000}
+                                                step={5000}
+                                                value={filters.minLiquidity}
+                                                onChange={(e) => handleFilterChange('minLiquidity', Number(e.target.value))}
+                                                className="flex-grow-1"
+                                            />
+                                            <Form.Range
+                                                min={0}
+                                                max={1000000}
+                                                step={5000}
+                                                value={filters.maxLiquidity}
+                                                onChange={(e) => handleFilterChange('maxLiquidity', Number(e.target.value))}
+                                                className="flex-grow-1"
+                                            />
+                                        </div>
+                                    </Form.Group>
+                                </Col>
+
+                                {/* Chain Filter */}
+                                <Col md={3}>
+                                    <Form.Label className="small mb-1">Chains</Form.Label>
+                                    <div className="d-flex flex-wrap gap-1">
+                                        {['ethereum', 'bsc', 'base', 'polygon', 'solana'].map(chain => (
+                                            <Badge
+                                                key={chain}
+                                                bg={filters.selectedChains.has(chain) ? 'primary' : 'outline-secondary'}
+                                                style={{ cursor: 'pointer' }}
+                                                onClick={() => handleChainToggle(chain)}
+                                            >
+                                                {chain.toUpperCase()}
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                </Col>
+
+                                {/* Source Filter */}
+                                <Col md={3}>
+                                    <Form.Label className="small mb-1">Sources</Form.Label>
+                                    <div className="d-flex flex-wrap gap-1">
+                                        {['dexscreener', 'coingecko_trending', 'jupiter'].map(source => (
+                                            <Badge
+                                                key={source}
+                                                bg={filters.selectedSources.has(source) ? 'success' : 'outline-secondary'}
+                                                style={{ cursor: 'pointer' }}
+                                                onClick={() => handleSourceToggle(source)}
+                                            >
+                                                {source === 'dexscreener' ? 'DEX' :
+                                                    source === 'coingecko_trending' ? 'CG' : 'JUP'}
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                </Col>
+                            </Row>
+                        </Card.Body>
+                    </Card>
+
                     {/* Stats Summary */}
                     {stats && (
                         <div className="row mb-3">
                             <div className="col-md-3 text-center">
-                                <div className="fw-bold text-success">Total</div>
-                                <div className="fs-5">{stats.total_opportunities || 0}</div>
+                                <div className="fw-bold text-success">Showing</div>
+                                <div className="fs-5">{opportunities.length}</div>
+                                <small className="text-muted">of {filteredOpportunities.length} filtered</small>
                             </div>
                             <div className="col-md-3 text-center">
                                 <div className="fw-bold">High Liquidity</div>
-                                <div className="fs-5">{stats.high_liquidity_opportunities || 0}</div>
+                                <div className="fs-5">{filteredOpportunities.filter(o => (o.estimated_liquidity_usd || 0) >= 50000).length}</div>
                             </div>
                             <div className="col-md-3 text-center">
-                                <div className="fw-bold">Chains</div>
-                                <div className="fs-5">{stats.chains_active || 0}</div>
+                                <div className="fw-bold">Chains Active</div>
+                                <div className="fs-5">{new Set(filteredOpportunities.map(o => o.chain)).size}</div>
                             </div>
                             <div className="col-md-3 text-center">
-                                <div className="fw-bold">Avg Liquidity</div>
-                                <div className="fs-6">${(stats.average_liquidity_usd || 0).toLocaleString()}</div>
+                                <div className="fw-bold">Avg Score</div>
+                                <div className="fs-6">
+                                    {filteredOpportunities.length > 0
+                                        ? (filteredOpportunities.reduce((sum, o) => sum + (o.opportunity_score || 0), 0) / filteredOpportunities.length).toFixed(1)
+                                        : '0.0'
+                                    }
+                                </div>
                             </div>
+                        </div>
+                    )}
+
+                    {/* Pagination Controls - Top */}
+                    {filteredOpportunities.length > itemsPerPage && (
+                        <div className="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
+                            <div className="d-flex align-items-center gap-2">
+                                <small>Show:</small>
+                                <Form.Select
+                                    size="sm"
+                                    value={itemsPerPage}
+                                    onChange={(e) => handleItemsPerPageChange(Number(e.target.value))}
+                                    style={{ width: 'auto' }}
+                                >
+                                    <option value={10}>10</option>
+                                    <option value={20}>20</option>
+                                    <option value={50}>50</option>
+                                    <option value={100}>100</option>
+                                </Form.Select>
+                                <small>per page</small>
+                            </div>
+
+                            <Pagination size="sm" className="mb-0">
+                                <Pagination.First
+                                    disabled={currentPage === 1}
+                                    onClick={() => handlePageChange(1)}
+                                />
+                                <Pagination.Prev
+                                    disabled={currentPage === 1}
+                                    onClick={() => handlePageChange(currentPage - 1)}
+                                />
+
+                                {/* Show page numbers around current page */}
+                                {Array.from({ length: Math.min(7, totalPages) }, (_, i) => {
+                                    let pageNum;
+                                    if (totalPages <= 7) {
+                                        pageNum = i + 1;
+                                    } else if (currentPage <= 4) {
+                                        pageNum = i + 1;
+                                    } else if (currentPage >= totalPages - 3) {
+                                        pageNum = totalPages - 6 + i;
+                                    } else {
+                                        pageNum = currentPage - 3 + i;
+                                    }
+
+                                    return (
+                                        <Pagination.Item
+                                            key={pageNum}
+                                            active={pageNum === currentPage}
+                                            onClick={() => handlePageChange(pageNum)}
+                                        >
+                                            {pageNum}
+                                        </Pagination.Item>
+                                    );
+                                })}
+
+                                <Pagination.Next
+                                    disabled={currentPage === totalPages}
+                                    onClick={() => handlePageChange(currentPage + 1)}
+                                />
+                                <Pagination.Last
+                                    disabled={currentPage === totalPages}
+                                    onClick={() => handlePageChange(totalPages)}
+                                />
+                            </Pagination>
+
+                            <small className="text-muted">
+                                {((currentPage - 1) * itemsPerPage) + 1}-{Math.min(currentPage * itemsPerPage, filteredOpportunities.length)}
+                                of {filteredOpportunities.length}
+                            </small>
                         </div>
                     )}
 
@@ -229,11 +496,12 @@ export function LiveOpportunitiesCard() {
                                         <th>Liquidity</th>
                                         <th>Source</th>
                                         <th>Score</th>
+                                        <th>Time</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {opportunities.slice(0, 10).map((opp, index) => (
+                                    {opportunities.map((opp, index) => (
                                         <tr key={`${opp.pair_address}-${index}`}>
                                             <td>
                                                 <strong>{opp.token0_symbol || 'TOKEN'}</strong>
@@ -261,7 +529,8 @@ export function LiveOpportunitiesCard() {
                                             <td>
                                                 <Badge
                                                     bg={opp.source === 'dexscreener' ? 'success' :
-                                                        opp.source === 'mock' ? 'warning' : 'secondary'}
+                                                        opp.source === 'coingecko_trending' ? 'warning' :
+                                                            opp.source === 'jupiter' ? 'primary' : 'secondary'}
                                                 >
                                                     {opp.source || 'unknown'}
                                                 </Badge>
@@ -273,6 +542,11 @@ export function LiveOpportunitiesCard() {
                                                 }>
                                                     {opp.opportunity_score ? opp.opportunity_score.toFixed(1) : 'N/A'}
                                                 </Badge>
+                                            </td>
+                                            <td>
+                                                <small className="text-muted">
+                                                    {formatTimeAgo(opp.timestamp)}
+                                                </small>
                                             </td>
                                             <td>
                                                 <Button
@@ -292,9 +566,60 @@ export function LiveOpportunitiesCard() {
                     ) : (
                         !loading && (
                             <Alert variant="info">
-                                No opportunities found. The system is scanning for new trading opportunities...
+                                {rawOpportunities.length === 0
+                                    ? "No opportunities found. The system is scanning for new trading opportunities..."
+                                    : "No opportunities match your current filters. Try adjusting the filter settings above."
+                                }
                             </Alert>
                         )
+                    )}
+
+                    {/* Pagination Controls - Bottom */}
+                    {filteredOpportunities.length > itemsPerPage && (
+                        <div className="d-flex justify-content-center mt-3 border-top pt-3">
+                            <Pagination>
+                                <Pagination.First
+                                    disabled={currentPage === 1}
+                                    onClick={() => handlePageChange(1)}
+                                />
+                                <Pagination.Prev
+                                    disabled={currentPage === 1}
+                                    onClick={() => handlePageChange(currentPage - 1)}
+                                />
+
+                                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                                    let pageNum;
+                                    if (totalPages <= 5) {
+                                        pageNum = i + 1;
+                                    } else if (currentPage <= 3) {
+                                        pageNum = i + 1;
+                                    } else if (currentPage >= totalPages - 2) {
+                                        pageNum = totalPages - 4 + i;
+                                    } else {
+                                        pageNum = currentPage - 2 + i;
+                                    }
+
+                                    return (
+                                        <Pagination.Item
+                                            key={pageNum}
+                                            active={pageNum === currentPage}
+                                            onClick={() => handlePageChange(pageNum)}
+                                        >
+                                            {pageNum}
+                                        </Pagination.Item>
+                                    );
+                                })}
+
+                                <Pagination.Next
+                                    disabled={currentPage === totalPages}
+                                    onClick={() => handlePageChange(currentPage + 1)}
+                                />
+                                <Pagination.Last
+                                    disabled={currentPage === totalPages}
+                                    onClick={() => handlePageChange(totalPages)}
+                                />
+                            </Pagination>
+                        </div>
                     )}
                 </Card.Body>
             </Card>
@@ -319,7 +644,7 @@ export function LiveOpportunitiesCard() {
                         {analyzing ? (
                             <div className="text-center py-4">
                                 <Spinner animation="border" />
-                                <div className="mt-2">Analyzing with AI intelligence...</div>
+                                <div className="mt-2">Analyzing opportunity...</div>
                             </div>
                         ) : analysisResult ? (
                             analysisResult.error ? (
@@ -328,183 +653,37 @@ export function LiveOpportunitiesCard() {
                                 </Alert>
                             ) : (
                                 <div>
-                                    {/* Recommendation Summary */}
-                                    {analysisResult.recommendation && (
-                                        <Alert variant={
-                                            analysisResult.recommendation.action === 'ENTER' ? 'success' :
-                                                analysisResult.recommendation.action === 'HOLD' ? 'warning' : 'danger'
-                                        } className="mb-3">
-                                            <div className="d-flex justify-content-between align-items-center mb-2">
-                                                <strong>Recommendation: {analysisResult.recommendation.action}</strong>
-                                                <Badge bg="secondary">{(analysisResult.recommendation.confidence * 100).toFixed(0)}% confidence</Badge>
-                                            </div>
-                                            <small>{analysisResult.recommendation.rationale}</small>
-                                        </Alert>
-                                    )}
-
-                                    {/* Key Metrics Row */}
                                     <div className="row mb-3">
-                                        <div className="col-md-3 text-center">
-                                            <div className="fw-bold">Risk Score</div>
+                                        <div className="col-md-6">
+                                            <strong>Risk Score:</strong> {analysisResult.risk_score || 'N/A'}
+                                        </div>
+                                        <div className="col-md-6">
+                                            <strong>Recommendation:</strong>
                                             <Badge bg={
-                                                (analysisResult.risk_assessment?.risk_score || 0) <= 3 ? 'success' :
-                                                    (analysisResult.risk_assessment?.risk_score || 0) <= 6 ? 'warning' : 'danger'
-                                            }>
-                                                {analysisResult.risk_assessment?.risk_score || 'N/A'}/10
+                                                analysisResult.recommendation === 'buy' ? 'success' :
+                                                    analysisResult.recommendation === 'hold' ? 'warning' : 'danger'
+                                            } className="ms-2">
+                                                {analysisResult.recommendation || 'N/A'}
                                             </Badge>
-                                        </div>
-                                        <div className="col-md-3 text-center">
-                                            <div className="fw-bold">Momentum</div>
-                                            <div className="fs-5">{analysisResult.trading_signals?.momentum_score || 'N/A'}/10</div>
-                                        </div>
-                                        <div className="col-md-3 text-center">
-                                            <div className="fw-bold">Technical Score</div>
-                                            <div className="fs-5">{analysisResult.trading_signals?.technical_score || 'N/A'}/10</div>
-                                        </div>
-                                        <div className="col-md-3 text-center">
-                                            <div className="fw-bold">Position Size</div>
-                                            <Badge bg="info">{analysisResult.recommendation?.position_size || 'N/A'}</Badge>
                                         </div>
                                     </div>
 
-                                    {/* Trading Strategy */}
-                                    {analysisResult.recommendation && (
-                                        <div className="mb-3">
-                                            <h6>Trading Strategy</h6>
-                                            <div className="row small">
-                                                <div className="col-md-6">
-                                                    <div>Entry: <Badge bg="primary">{analysisResult.recommendation.entry_strategy}</Badge></div>
-                                                    <div>Stop Loss: <span className="text-danger">{(analysisResult.recommendation.stop_loss * 100 - 100).toFixed(1)}%</span></div>
-                                                </div>
-                                                <div className="col-md-6">
-                                                    <div>Take Profit 1: <span className="text-success">+{(analysisResult.recommendation.take_profit_1 * 100 - 100).toFixed(1)}%</span></div>
-                                                    <div>Take Profit 2: <span className="text-success">+{(analysisResult.recommendation.take_profit_2 * 100 - 100).toFixed(1)}%</span></div>
-                                                </div>
-                                            </div>
+                                    {analysisResult.liquidity_risk && (
+                                        <div className="mb-2">
+                                            <strong>Liquidity Risk:</strong> {analysisResult.liquidity_risk}
                                         </div>
                                     )}
 
-                                    {/* Risk Assessment */}
-                                    {analysisResult.risk_assessment && (
-                                        <div className="mb-3">
-                                            <h6>Risk Assessment</h6>
-                                            <div className="row small">
-                                                <div className="col-md-6">
-                                                    <div>Contract: <Badge bg={analysisResult.risk_assessment.contract_verification === 'verified' ? 'success' : 'danger'}>
-                                                        {analysisResult.risk_assessment.contract_verification}
-                                                    </Badge></div>
-                                                    <div>Honeypot Risk: <Badge bg={
-                                                        analysisResult.risk_assessment.honeypot_risk === 'low' ? 'success' :
-                                                            analysisResult.risk_assessment.honeypot_risk === 'medium' ? 'warning' : 'danger'
-                                                    }>
-                                                        {analysisResult.risk_assessment.honeypot_risk}
-                                                    </Badge></div>
-                                                    <div>Ownership: <Badge bg={analysisResult.risk_assessment.ownership_risk === 'renounced' ? 'success' : 'warning'}>
-                                                        {analysisResult.risk_assessment.ownership_risk}
-                                                    </Badge></div>
-                                                </div>
-                                                <div className="col-md-6">
-                                                    <div>Buy Tax: {analysisResult.risk_assessment.buy_tax}%</div>
-                                                    <div>Sell Tax: {analysisResult.risk_assessment.sell_tax}%</div>
-                                                    <div>Liquidity Locked: {analysisResult.risk_assessment.liquidity_locked ? 'Yes' : 'No'}
-                                                        {analysisResult.risk_assessment.lock_duration_days && ` (${analysisResult.risk_assessment.lock_duration_days} days)`}
-                                                    </div>
-                                                </div>
-                                            </div>
+                                    {analysisResult.tax_analysis && (
+                                        <div className="mb-2">
+                                            <strong>Tax Analysis:</strong> Buy {(analysisResult.tax_analysis.buy_tax * 100).toFixed(1)}% /
+                                            Sell {(analysisResult.tax_analysis.sell_tax * 100).toFixed(1)}%
                                         </div>
                                     )}
 
-                                    {/* Liquidity Analysis */}
-                                    {analysisResult.liquidity_analysis && (
-                                        <div className="mb-3">
-                                            <h6>Liquidity Analysis</h6>
-                                            <div className="row small">
-                                                <div className="col-md-6">
-                                                    <div>Current Liquidity: ${analysisResult.liquidity_analysis.current_liquidity_usd?.toLocaleString()}</div>
-                                                    <div>24h Volume: ${analysisResult.liquidity_analysis.volume_24h_usd?.toLocaleString()}</div>
-                                                    <div>Volume/Liquidity: {(analysisResult.liquidity_analysis.volume_to_liquidity_ratio * 100).toFixed(1)}%</div>
-                                                </div>
-                                                <div className="col-md-6">
-                                                    <div>Depth 5%: ${analysisResult.liquidity_analysis.liquidity_depth_5pct?.toLocaleString()}</div>
-                                                    <div>Depth 10%: ${analysisResult.liquidity_analysis.liquidity_depth_10pct?.toLocaleString()}</div>
-                                                    <div>Stability: <Badge bg={
-                                                        analysisResult.liquidity_analysis.liquidity_stability_24h === 'stable' ? 'success' : 'warning'
-                                                    }>
-                                                        {analysisResult.liquidity_analysis.liquidity_stability_24h}
-                                                    </Badge></div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Token Information */}
-                                    {analysisResult.token_analysis && (
-                                        <div className="mb-3">
-                                            <h6>Token Information</h6>
-                                            {analysisResult.token_analysis.token0 && (
-                                                <div className="small">
-                                                    <div className="fw-bold">{analysisResult.token_analysis.token0.symbol}</div>
-                                                    <div className="row">
-                                                        <div className="col-md-6">
-                                                            <div>Total Supply: {(analysisResult.token_analysis.token0.total_supply / 1000000).toFixed(1)}M</div>
-                                                            <div>Circulating: {(analysisResult.token_analysis.token0.circulating_supply / 1000000).toFixed(1)}M</div>
-                                                        </div>
-                                                        <div className="col-md-6">
-                                                            <div>Holders: {analysisResult.token_analysis.token0.holder_count?.toLocaleString()}</div>
-                                                            <div>Top 10 Hold: {analysisResult.token_analysis.token0.top_10_holder_percentage}%</div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-
-                                    {/* Trading Signals */}
-                                    {analysisResult.trading_signals && (
-                                        <div className="mb-3">
-                                            <h6>Market Signals</h6>
-                                            <div className="row small">
-                                                <div className="col-md-6">
-                                                    <div>Trend: <Badge bg={
-                                                        analysisResult.trading_signals.trend_direction === 'bullish' ? 'success' :
-                                                            analysisResult.trading_signals.trend_direction === 'bearish' ? 'danger' : 'secondary'
-                                                    }>
-                                                        {analysisResult.trading_signals.trend_direction}
-                                                    </Badge></div>
-                                                    <div>Volume Trend: <Badge bg={
-                                                        analysisResult.trading_signals.volume_trend === 'increasing' ? 'success' : 'warning'
-                                                    }>
-                                                        {analysisResult.trading_signals.volume_trend}
-                                                    </Badge></div>
-                                                </div>
-                                                <div className="col-md-6">
-                                                    <div>Social Sentiment: <Badge bg="info">{analysisResult.trading_signals.social_sentiment}</Badge></div>
-                                                    <div>Whale Activity: <Badge bg={
-                                                        analysisResult.trading_signals.whale_activity === 'accumulating' ? 'success' : 'secondary'
-                                                    }>
-                                                        {analysisResult.trading_signals.whale_activity}
-                                                    </Badge></div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Execution Parameters */}
-                                    {analysisResult.recommendation && (
-                                        <div className="mb-3">
-                                            <h6>Execution Settings</h6>
-                                            <div className="small">
-                                                <div>Max Slippage: {(analysisResult.recommendation.max_slippage * 100).toFixed(1)}%</div>
-                                                <div>Gas Priority: <Badge bg="secondary">{analysisResult.recommendation.gas_priority}</Badge></div>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Analysis Metadata */}
-                                    {analysisResult.pair_info && (
-                                        <div className="text-muted small">
-                                            <div>Analyzed: {new Date(analysisResult.pair_info.analyzed_at).toLocaleString()}</div>
-                                            <div>Chain: {analysisResult.pair_info.chain} | DEX: {analysisResult.pair_info.dex}</div>
+                                    {analysisResult.confidence && (
+                                        <div className="mb-2">
+                                            <strong>Confidence:</strong> {(analysisResult.confidence * 100).toFixed(1)}%
                                         </div>
                                     )}
                                 </div>
