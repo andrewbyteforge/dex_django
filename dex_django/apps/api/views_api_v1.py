@@ -243,3 +243,44 @@ def bot_stop(request):
         "status": "ok",
         "message": "Bot stopped successfully"
     })
+
+
+# Add these functions to handle the CRUD endpoints properly
+
+@api_view(["GET", "POST"])
+@permission_classes([AllowAny])
+def provider_list(request):
+    """List or create providers."""
+    if request.method == "GET":
+        providers = Provider.objects.all()
+        serializer = ProviderSerializer(providers, many=True)
+        return Response({"results": serializer.data, "count": len(serializer.data)})
+    else:
+        serializer = ProviderSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=201)
+        return Response(serializer.errors, status=400)
+
+@api_view(["GET", "POST"]) 
+@permission_classes([AllowAny])
+def token_list(request):
+    """List or create tokens."""
+    if request.method == "GET":
+        tokens = Token.objects.all()
+        serializer = TokenSerializer(tokens, many=True)
+        return Response({"results": serializer.data, "count": len(serializer.data)})
+    else:
+        serializer = TokenSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=201)
+        return Response(serializer.errors, status=400)
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def trade_list(request):
+    """List trades."""
+    trades = Trade.objects.all()
+    serializer = TradeSerializer(trades, many=True)
+    return Response({"results": serializer.data, "count": len(serializer.data)})

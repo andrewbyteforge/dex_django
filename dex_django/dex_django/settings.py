@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    'apps.intelligence',
 
     # Third-party
     "rest_framework",
@@ -59,6 +60,23 @@ INSTALLED_APPS = [
     "apps.sim",
     "corsheaders", 
 ]
+
+
+# Add intelligence-specific settings
+INTELLIGENCE_SETTINGS = {
+    'ADVANCED_RISK_ENABLED': True,
+    'MEMPOOL_MONITORING_ENABLED': True,
+    'CROSS_CHAIN_ANALYSIS_ENABLED': True,
+    'SOCIAL_ANALYSIS_ENABLED': True,
+    'CACHE_ANALYSIS_RESULTS': True,
+    'CACHE_TTL_SECONDS': 300,
+    'RPC_ENDPOINTS': {
+        'ethereum': 'https://eth.llamarpc.com',
+        'bsc': 'https://bsc-dataseed.binance.org',
+        'polygon': 'https://polygon-rpc.com',
+        'base': 'https://mainnet.base.org'
+    }
+}
 
 ASGI_APPLICATION = 'dex_django.asgi.application'
 

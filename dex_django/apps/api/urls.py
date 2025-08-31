@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-
 from .views import index, health
 from .views_api_v1 import (
     ping,
@@ -21,7 +20,6 @@ from .views_paper import (
     paper_metrics,
     paper_thought_log_test,
 )
-
 from .views_discovery import (
     discovery_status,
     discovery_start,
@@ -30,13 +28,32 @@ from .views_discovery import (
     recent_discoveries,
     force_discovery_scan,
 )
-
 from .views_live_opportunities import (
     live_opportunities,
-    refresh_opportunities, 
+    refresh_opportunities,
     opportunity_stats,
+    analyze_opportunity,
+)
+from .views_wallet import (
+    wallet_balances,
+    prepare_transaction,
+    supported_chains,
 )
 
+# Try to import intelligence views with error handling
+try:
+    from .views_bot_intelligence import (
+        analyze_opportunities,
+        detailed_analysis,
+        risk_settings,
+        intelligence_status
+    )
+    INTELLIGENCE_AVAILABLE = True
+except ImportError as e:
+    print(f"Intelligence views not available: {e}")
+    INTELLIGENCE_AVAILABLE = False
+
+# Set up DRF router
 router_v1 = DefaultRouter()
 router_v1.register(r"providers", ProviderViewSet, basename="providers")
 router_v1.register(r"tokens", TokenViewSet, basename="tokens")
@@ -45,29 +62,52 @@ router_v1.register(r"trades", TradeViewSet, basename="trades")
 router_v1.register(r"ledger", LedgerEntryViewSet, basename="ledger")
 
 urlpatterns = [
+    # Basic endpoints
     path("", index, name="index"),
     path("health", health, name="health"),
     path("api/v1/health", health, name="api-health"),
+    
+    # Bot control endpoints
     path("api/v1/bot/settings", bot_settings, name="bot-settings"),
     path("api/v1/bot/status", bot_status, name="bot-status"),
     path("api/v1/bot/start", bot_start, name="bot-start"),
     path("api/v1/bot/stop", bot_stop, name="bot-stop"),
+    
     # Paper Trading endpoints
     path("api/v1/paper/toggle", paper_toggle, name="paper-toggle"),
     path("api/v1/metrics/paper", paper_metrics, name="paper-metrics"),
     path("api/v1/paper/thought-log/test", paper_thought_log_test, name="paper-thought-log-test"),
+    
+    # Discovery endpoints
     path("api/v1/discovery/scan", force_discovery_scan, name="force-discovery-scan"),
     path("api/v1/discovery/status", discovery_status, name="discovery-status"),
     path("api/v1/discovery/start", discovery_start, name="discovery-start"),
     path("api/v1/discovery/stop", discovery_stop, name="discovery-stop"),
     path("api/v1/discovery/config", discovery_config, name="discovery-config"),
     path("api/v1/discovery/recent", recent_discoveries, name="recent-discoveries"),
-
+    
+    # Live Opportunities endpoints
     path("api/v1/opportunities/live", live_opportunities, name="live-opportunities"),
     path("api/v1/opportunities/refresh", refresh_opportunities, name="refresh-opportunities"),
     path("api/v1/opportunities/stats", opportunity_stats, name="opportunity-stats"),
-    path(
-        "api/v1/",
-        include(([path("ping", ping, name="ping")] + router_v1.urls, "api_v1"), namespace="api_v1"),
-    ),
+    path("api/v1/opportunities/analyze", analyze_opportunity, name="analyze-opportunity"),
+    
+    # Wallet endpoints
+    path("api/v1/wallet/balances", wallet_balances, name="wallet-balances"),
+    path("api/v1/wallet/prepare", prepare_transaction, name="prepare-transaction"),
+    path("api/v1/chains", supported_chains, name="supported-chains"),
+    
+    # DRF router endpoints (includes ping and CRUD)
+    path("api/v1/", include((router_v1.urls + [
+        path("ping", ping, name="ping")
+    ], "api_v1"), namespace="api_v1")),
 ]
+
+# Add intelligence endpoints if available
+if INTELLIGENCE_AVAILABLE:
+    urlpatterns.extend([
+        path("api/v1/intelligence/analyze", analyze_opportunities, name="analyze-opportunities"),
+        path("api/v1/intelligence/detailed", detailed_analysis, name="detailed-analysis"),
+        path("api/v1/intelligence/risk", risk_settings, name="risk-settings"),
+        path("api/v1/intelligence/status", intelligence_status, name="intelligence-status"),
+    ])

@@ -5,10 +5,16 @@ import { TokenModal } from './components/TokenModal.jsx';
 import { DiscoveryCard } from './components/DiscoveryCard.jsx';
 import { LiveOpportunitiesCard } from './components/LiveOpportunitiesCard.jsx';
 import { useDjangoData, useBotControl, useDjangoMutations } from './hooks/useDjangoApi.js';
+import { DashboardHeader } from './components/DashboardHeader';
+import { WalletConnectButton } from './components/WalletConnectButton';
+import { WalletStatusBar } from './components/WalletStatusBar';
+import { IntelligencePanel } from './components/IntelligencePanel'; // <-- added
 
 export default function App() {
     const [activeTab, setActiveTab] = useState('dashboard');
     const [showTokenModal, setShowTokenModal] = useState(false);
+    const [tradingMode, setTradingMode] = useState('paper'); // 'paper' or 'manual'
+    const [liveOpportunities, setLiveOpportunities] = useState([]); // <-- added
 
     // Django API hooks
     const {
@@ -57,7 +63,7 @@ export default function App() {
     const handleAddToken = async (tokenData) => {
         try {
             console.log('Adding token:', tokenData);
-            setTokenError(null); // Clear previous errors
+            setTokenError(null);
             await tokenMutations.create(tokenData);
             console.log('Token added successfully');
             setShowTokenModal(false);
@@ -77,7 +83,7 @@ export default function App() {
 
         try {
             console.log('Removing token ID:', id);
-            setTokenError(null); // Clear previous errors
+            setTokenError(null);
             await tokenMutations.remove(id);
             console.log('Token removed successfully');
             refreshTokens();
@@ -105,11 +111,29 @@ export default function App() {
         }
     };
 
+    const handleEmergencyStop = () => {
+        console.log('Emergency stop triggered');
+        if (botStatus?.status === 'running') {
+            handleStopBot();
+        }
+    };
+
+    const handleExportLogs = () => {
+        console.log('Export logs triggered');
+        // Add log export logic here
+        alert('Log export functionality coming soon!');
+    };
+
     return (
         <Container fluid className="py-3">
             <Row>
                 <Col>
-                    <h1 className="mb-4">DEX Sniper Pro — Dashboard</h1>
+                    {/* Dashboard Header with Wallet Integration */}
+                    <DashboardHeader
+                        botStatus={botStatus}
+                        onEmergencyStop={handleEmergencyStop}
+                        onExportLogs={handleExportLogs}
+                    />
 
                     <Tab.Container activeKey={activeTab} onSelect={(k) => setActiveTab(k)}>
                         <Nav variant="tabs" className="mb-4">
@@ -151,6 +175,9 @@ export default function App() {
                         </Nav>
 
                         <Tab.Content>
+                            {/* Wallet Status Bar - shows on all tabs */}
+                            <WalletStatusBar tradingMode={tradingMode} />
+
                             {/* Dashboard Tab */}
                             <Tab.Pane eventKey="dashboard">
                                 <Row>
@@ -191,6 +218,29 @@ export default function App() {
                                         </Card>
                                     </Col>
                                     <Col lg={4}>
+                                        <Card className="mb-3">
+                                            <Card.Header><strong>Trading Mode</strong></Card.Header>
+                                            <Card.Body>
+                                                <div className="d-grid gap-2">
+                                                    <Button
+                                                        variant={tradingMode === 'paper' ? 'success' : 'outline-secondary'}
+                                                        onClick={() => setTradingMode('paper')}
+                                                    >
+                                                        📝 Paper Trading
+                                                    </Button>
+                                                    <Button
+                                                        variant={tradingMode === 'manual' ? 'primary' : 'outline-secondary'}
+                                                        onClick={() => setTradingMode('manual')}
+                                                    >
+                                                        🔗 Manual Trading
+                                                    </Button>
+                                                    <Button variant="outline-warning" disabled>
+                                                        ⚡ Auto Trading (Coming Soon)
+                                                    </Button>
+                                                </div>
+                                            </Card.Body>
+                                        </Card>
+
                                         <Card>
                                             <Card.Header><strong>Quick Actions</strong></Card.Header>
                                             <Card.Body className="d-grid gap-2">
@@ -208,8 +258,6 @@ export default function App() {
                                                 >
                                                     {botLoading ? 'Loading...' : 'Stop Bot'}
                                                 </Button>
-                                                <Button variant="outline-primary">Emergency Stop</Button>
-                                                <Button variant="outline-secondary">Export Logs</Button>
                                                 {botError && (
                                                     <Alert variant="danger" className="mt-2">
                                                         {fmtError(botError)}
@@ -223,6 +271,10 @@ export default function App() {
 
                             {/* Discovery Tab */}
                             <Tab.Pane eventKey="discovery">
+                                <IntelligencePanel
+                                    opportunities={liveOpportunities}
+                                    userBalance={1000}
+                                />
                                 <LiveOpportunitiesCard />
                             </Tab.Pane>
 
@@ -317,6 +369,18 @@ export default function App() {
                                             <Card.Header><strong>Trading Settings</strong></Card.Header>
                                             <Card.Body>
                                                 <div className="mb-3">
+                                                    <label className="form-label">Trading Mode</label>
+                                                    <select
+                                                        className="form-select"
+                                                        value={tradingMode}
+                                                        onChange={(e) => setTradingMode(e.target.value)}
+                                                    >
+                                                        <option value="paper">📝 Paper Trading</option>
+                                                        <option value="manual">🔗 Manual Trading</option>
+                                                        <option value="auto" disabled>⚡ Auto Trading (Coming Soon)</option>
+                                                    </select>
+                                                </div>
+                                                <div className="mb-3">
                                                     <label className="form-label">Max Slippage (%)</label>
                                                     <input type="number" className="form-control" defaultValue="3" />
                                                 </div>
@@ -332,7 +396,7 @@ export default function App() {
                                         </Card>
                                     </Col>
                                     <Col md={6}>
-                                        <Card>
+                                        <Card className="mb-3">
                                             <Card.Header><strong>Risk Management</strong></Card.Header>
                                             <Card.Body>
                                                 <div className="mb-3">
@@ -351,6 +415,19 @@ export default function App() {
                                                 </div>
                                             </Card.Body>
                                         </Card>
+
+                                        <Card>
+                                            <Card.Header><strong>Wallet Integration</strong></Card.Header>
+                                            <Card.Body>
+                                                <div className="mb-3">
+                                                    <WalletConnectButton />
+                                                </div>
+                                                <div className="small text-muted">
+                                                    Connect your wallet to enable manual trading mode.
+                                                    Paper trading mode requires no wallet connection.
+                                                </div>
+                                            </Card.Body>
+                                        </Card>
                                     </Col>
                                 </Row>
                             </Tab.Pane>
@@ -360,8 +437,12 @@ export default function App() {
                     {/* Token Modal */}
                     <TokenModal
                         show={showTokenModal}
-                        onHide={() => setShowTokenModal(false)}
-                        onSubmit={handleAddToken}
+                        onHide={() => {
+                            setShowTokenModal(false);
+                            setTokenError(null);
+                        }}
+                        onSave={handleAddToken}
+                        loading={tokenMutations.loading}
                         error={tokenError}
                     />
                 </Col>

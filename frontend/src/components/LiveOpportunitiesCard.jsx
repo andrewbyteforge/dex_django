@@ -1,260 +1,213 @@
-import { useState, useEffect } from 'react';
-import { Card, Button, Badge, Alert, Spinner, Table } from 'react-bootstrap';
-import axios from 'axios';
+import { useState, useEffect, useRef } from 'react';
+import { Card, Button, Table, Badge, Alert, Spinner } from 'react-bootstrap';
+import { useDjangoData } from '../hooks/useDjangoApi';
 
 export function LiveOpportunitiesCard() {
-    const [opportunities, setOpportunities] = useState([]);
-    const [stats, setStats] = useState(null);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState(null);
-    const [lastUpdated, setLastUpdated] = useState(null);
+    const [autoRefresh, setAutoRefresh] = useState(true);
+    const [lastUpdate, setLastUpdate] = useState(null);
+    const refreshIntervalRef = useRef(null);
 
-    const api = axios.create({
-        baseURL: 'http://127.0.0.1:8000',
-        timeout: 10000
-    });
+    const {
+        data: opportunities,
+        loading,
+        error,
+        refresh
+    } = useDjangoData('/api/v1/opportunities/live', []);
 
-    const fetchOpportunities = async () => {
-        setLoading(true);
-        setError(null);
+    const {
+        data: stats,
+        refresh: refreshStats
+    } = useDjangoData('/api/v1/opportunities/stats', {});
 
-        try {
-            console.log('Fetching live opportunities...');
-            const [opportunitiesResponse, statsResponse] = await Promise.all([
-                api.get('/api/v1/opportunities/live'),
-                api.get('/api/v1/opportunities/stats')
-            ]);
-
-            console.log('Opportunities response:', opportunitiesResponse.data);
-            console.log('Stats response:', statsResponse.data);
-
-            if (opportunitiesResponse.data?.status === 'ok') {
-                setOpportunities(opportunitiesResponse.data.opportunities || []);
-                setLastUpdated(opportunitiesResponse.data.last_updated);
-            }
-
-            if (statsResponse.data?.status === 'ok') {
-                setStats(statsResponse.data.stats);
-            }
-        } catch (err) {
-            console.error('Failed to fetch live opportunities:', err);
-            setError(err.response?.data?.error || err.message);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleRefresh = async () => {
-        try {
-            console.log('Force refreshing opportunities...');
-            const response = await api.post('/api/v1/opportunities/refresh');
-            console.log('Refresh response:', response.data);
-
-            if (response.data?.status === 'ok') {
-                setOpportunities(response.data.opportunities || []);
-                // Refresh stats too
-                await fetchStats();
-            }
-        } catch (err) {
-            console.error('Failed to refresh opportunities:', err);
-            setError(err.response?.data?.error || err.message);
-        }
-    };
-
-    const fetchStats = async () => {
-        try {
-            const response = await api.get('/api/v1/opportunities/stats');
-            if (response.data?.status === 'ok') {
-                setStats(response.data.stats);
-            }
-        } catch (err) {
-            console.error('Failed to fetch stats:', err);
-        }
-    };
-
+    // Auto-refresh mechanism
     useEffect(() => {
-        fetchOpportunities();
-        const interval = setInterval(fetchOpportunities, 60000);
-        return () => clearInterval(interval);
-    }, []);
+        if (autoRefresh) {
+            // Refresh every 15 seconds instead of 60
+            refreshIntervalRef.current = setInterval(() => {
+                console.log('Auto-refreshing opportunities...');
+                refresh();
+                refreshStats();
+                setLastUpdate(new Date());
+            }, 15000);
+        } else {
+            if (refreshIntervalRef.current) {
+                clearInterval(refreshIntervalRef.current);
+            }
+        }
+
+        return () => {
+            if (refreshIntervalRef.current) {
+                clearInterval(refreshIntervalRef.current);
+            }
+        };
+    }, [autoRefresh, refresh, refreshStats]);
+
+    const handleManualRefresh = async () => {
+        setLastUpdate(new Date());
+        await Promise.all([refresh(), refreshStats()]);
+    };
 
     const formatTimeAgo = (timestamp) => {
-        if (!timestamp) return 'Unknown';
-        const diff = Date.now() - new Date(timestamp).getTime();
-        const minutes = Math.floor(diff / 60000);
-        const hours = Math.floor(minutes / 60);
+        if (!timestamp) return 'Never';
+        const now = new Date();
+        const then = new Date(timestamp);
+        const diffMs = now - then;
+        const diffSeconds = Math.floor(diffMs / 1000);
 
-        if (hours > 0) return `${hours}h ${minutes % 60}m ago`;
-        if (minutes > 0) return `${minutes}m ago`;
-        return 'Just now';
-    };
-
-    const getOpportunityBadge = (opportunity) => {
-        const score = opportunity.opportunity_score || 0;
-        const liquidity = opportunity.estimated_liquidity_usd || 0;
-
-        if (score >= 15 && liquidity >= 100000) return { bg: 'success', text: 'HIGH' };
-        if (score >= 10 && liquidity >= 50000) return { bg: 'warning', text: 'MED' };
-        if (score >= 5) return { bg: 'info', text: 'LOW' };
-        return { bg: 'secondary', text: 'MIN' };
-    };
-
-    const getChainColor = (chain) => {
-        const colors = {
-            ethereum: 'primary',
-            bsc: 'warning',
-            polygon: 'success',
-            base: 'info'
-        };
-        return colors[chain] || 'secondary';
+        if (diffSeconds < 60) return `${diffSeconds}s ago`;
+        if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)}m ago`;
+        return `${Math.floor(diffSeconds / 3600)}h ago`;
     };
 
     return (
         <Card className="mb-4">
             <Card.Header className="d-flex justify-content-between align-items-center">
                 <div className="d-flex align-items-center gap-2">
-                    <strong>Live Opportunities</strong>
-                    <Badge bg="success">LIVE</Badge>
+                    <strong>🔴 Live Opportunities</strong>
+                    {stats && (
+                        <Badge bg="info">
+                            {stats.total_opportunities || 0} found
+                        </Badge>
+                    )}
                 </div>
-                <div className="d-flex gap-2">
+                <div className="d-flex align-items-center gap-2">
+                    <small className="text-muted">
+                        {lastUpdate ? `Updated ${formatTimeAgo(lastUpdate)}` : 'No updates yet'}
+                    </small>
+                    <div className="form-check form-switch">
+                        <input
+                            className="form-check-input"
+                            type="checkbox"
+                            id="autoRefresh"
+                            checked={autoRefresh}
+                            onChange={(e) => setAutoRefresh(e.target.checked)}
+                        />
+                        <label className="form-check-label small" htmlFor="autoRefresh">
+                            Auto-refresh
+                        </label>
+                    </div>
                     <Button
-                        variant="outline-primary"
                         size="sm"
-                        onClick={handleRefresh}
+                        variant="outline-primary"
+                        onClick={handleManualRefresh}
                         disabled={loading}
                     >
-                        {loading ? <Spinner size="sm" /> : 'Refresh'}
+                        {loading ? (
+                            <>
+                                <span className="spinner-border spinner-border-sm me-1" />
+                                Refreshing...
+                            </>
+                        ) : (
+                            '🔄 Refresh'
+                        )}
                     </Button>
                 </div>
             </Card.Header>
 
             <Card.Body>
                 {error && (
-                    <Alert variant="danger" dismissible onClose={() => setError(null)}>
-                        <strong>Error:</strong> {error}
+                    <Alert variant="danger" className="mb-3">
+                        <strong>Error:</strong> {error.message || error}
                     </Alert>
                 )}
 
-                {/* Debug Info */}
-                <div className="mb-3 small text-muted">
-                    Loading: {loading ? 'Yes' : 'No'} |
-                    Opportunities: {opportunities.length} |
-                    Last Updated: {lastUpdated || 'Never'}
-                </div>
-
                 {/* Stats Summary */}
                 {stats && (
-                    <div className="row mb-4">
+                    <div className="row mb-3">
                         <div className="col-md-3 text-center">
-                            <div className="fw-bold text-primary">Total Found</div>
-                            <div className="fs-5">{stats.total_opportunities}</div>
+                            <div className="fw-bold text-success">Total Opportunities</div>
+                            <div className="fs-5">{stats.total_opportunities || 0}</div>
                         </div>
                         <div className="col-md-3 text-center">
-                            <div className="fw-bold text-success">High Liquidity</div>
-                            <div className="fs-5">{stats.high_liquidity_opportunities}</div>
+                            <div className="fw-bold">High Liquidity</div>
+                            <div className="fs-5">{stats.high_liquidity_opportunities || 0}</div>
                         </div>
                         <div className="col-md-3 text-center">
-                            <div className="fw-bold text-info">Active Chains</div>
-                            <div className="fs-5">{stats.chains_active}</div>
+                            <div className="fw-bold">Active Chains</div>
+                            <div className="fs-5">{stats.chains_active || 0}</div>
                         </div>
                         <div className="col-md-3 text-center">
-                            <div className="fw-bold text-secondary">Avg Liquidity</div>
-                            <div className="fs-6">${stats.average_liquidity_usd?.toLocaleString()}</div>
+                            <div className="fw-bold">Avg Liquidity</div>
+                            <div className="fs-5">${(stats.average_liquidity_usd || 0).toLocaleString()}</div>
                         </div>
                     </div>
                 )}
 
                 {/* Opportunities Table */}
-                {loading && opportunities.length === 0 && (
+                {loading && !opportunities?.length && (
                     <div className="text-center py-4">
-                        <Spinner />
-                        <div className="mt-2">Scanning live DEX data...</div>
+                        <Spinner animation="border" />
+                        <div className="mt-2">Loading fresh opportunities...</div>
                     </div>
                 )}
 
-                {opportunities.length === 0 && !loading ? (
-                    <div className="text-center py-4 text-muted">
-                        No live opportunities detected. Click Refresh to fetch from DexScreener API.
-                    </div>
-                ) : (
-                    <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
+                {opportunities?.length > 0 ? (
+                    <div className="table-responsive">
                         <Table striped hover size="sm">
-                            <thead className="table-dark sticky-top">
+                            <thead>
                                 <tr>
-                                    <th>Score</th>
+                                    <th>Token Pair</th>
                                     <th>Chain</th>
                                     <th>DEX</th>
-                                    <th>Token Pair</th>
                                     <th>Liquidity</th>
                                     <th>Age</th>
-                                    <th>Action</th>
+                                    <th>Source</th>
+                                    <th>Score</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {opportunities.map((opp, idx) => {
-                                    const badge = getOpportunityBadge(opp);
-                                    return (
-                                        <tr key={`${opp.pair_address}-${idx}`}>
-                                            <td>
-                                                <Badge bg={badge.bg}>
-                                                    {badge.text}
-                                                </Badge>
-                                                <div className="small text-muted">
-                                                    {opp.opportunity_score?.toFixed(1)}
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <Badge bg={getChainColor(opp.chain)}>
-                                                    {opp.chain?.toUpperCase()}
-                                                </Badge>
-                                            </td>
-                                            <td>
-                                                <Badge bg="secondary" className="text-uppercase">
-                                                    {opp.dex?.replace('_', ' ')}
-                                                </Badge>
-                                            </td>
-                                            <td>
-                                                <div>
-                                                    <strong>
-                                                        {opp.token0_symbol}/
-                                                        <span className="text-primary">{opp.token1_symbol}</span>
-                                                    </strong>
-                                                </div>
-                                                <div className="small text-muted">
-                                                    {opp.pair_address?.slice(0, 8)}...
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <div className={
-                                                    opp.estimated_liquidity_usd >= 100000 ? 'text-success fw-bold' :
-                                                        opp.estimated_liquidity_usd >= 50000 ? 'text-warning fw-bold' :
-                                                            opp.estimated_liquidity_usd >= 10000 ? 'text-info' : 'text-muted'
-                                                }>
-                                                    ${opp.estimated_liquidity_usd?.toLocaleString()}
-                                                </div>
-                                            </td>
-                                            <td className="small">
-                                                <div>
-                                                    {formatTimeAgo(opp.timestamp)}
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <Button
-                                                    size="sm"
-                                                    variant="outline-success"
-                                                    onClick={() => {
-                                                        console.log('Analyze opportunity:', opp);
-                                                    }}
-                                                >
-                                                    Analyze
-                                                </Button>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
+                                {opportunities.slice(0, 10).map((opp, index) => (
+                                    <tr key={`${opp.pair_address}-${index}`}>
+                                        <td>
+                                            <strong>{opp.token0_symbol || 'TOKEN'}</strong>
+                                            <span className="text-muted">/</span>
+                                            <span>{opp.token1_symbol || 'WETH'}</span>
+                                        </td>
+                                        <td>
+                                            <Badge bg="secondary">{opp.chain}</Badge>
+                                        </td>
+                                        <td>
+                                            <Badge bg="info">{opp.dex}</Badge>
+                                        </td>
+                                        <td>
+                                            <span className={
+                                                opp.estimated_liquidity_usd >= 100000 ? 'text-success fw-bold' :
+                                                    opp.estimated_liquidity_usd >= 50000 ? 'text-warning' :
+                                                        'text-danger'
+                                            }>
+                                                ${opp.estimated_liquidity_usd?.toLocaleString() || '0'}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <small>{formatTimeAgo(opp.timestamp)}</small>
+                                        </td>
+                                        <td>
+                                            <Badge
+                                                bg={opp.source === 'dexscreener' ? 'success' :
+                                                    opp.source === 'mock' ? 'warning' : 'secondary'}
+                                            >
+                                                {opp.source}
+                                            </Badge>
+                                        </td>
+                                        <td>
+                                            <Badge bg={
+                                                opp.opportunity_score >= 8 ? 'success' :
+                                                    opp.opportunity_score >= 6 ? 'warning' : 'secondary'
+                                            }>
+                                                {opp.opportunity_score?.toFixed(1) || 'N/A'}
+                                            </Badge>
+                                        </td>
+                                    </tr>
+                                ))}
                             </tbody>
                         </Table>
                     </div>
+                ) : (
+                    !loading && (
+                        <Alert variant="info">
+                            No opportunities found. The system is scanning for new trading opportunities...
+                        </Alert>
+                    )
                 )}
             </Card.Body>
         </Card>
