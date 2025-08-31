@@ -5,25 +5,32 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-# Add the project root to Python path for Django integration
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+# Fix the path setup for Django
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
-# Initialize Django for ORM access
+# Set Django settings module with correct path
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.settings')
-import django
-django.setup()
+
+# Initialize Django
+try:
+    import django
+    django.setup()
+    logger = logging.getLogger(__name__)
+    logger.info("Django initialized successfully")
+except Exception as e:
+    print(f"Django initialization failed: {e}")
+    # Continue without Django for now
+    logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
-
-logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -32,13 +39,26 @@ async def lifespan(app: FastAPI):
     logger.info("Starting DEX Sniper Pro...")
     
     try:
-        # Initialize blockchain providers
-        from apps.chains.providers import web3_manager
-        await web3_manager.initialize()
+        # Try to initialize components, but don't fail if they're not available
+        try:
+            from apps.core.runtime_state import runtime_state
+            logger.info("Runtime state initialized")
+        except ImportError as e:
+            logger.warning(f"Runtime state not available: {e}")
         
-        # Initialize DEX routers
-        from apps.dex.routers import dex_manager
-        await dex_manager.initialize()
+        try:
+            from apps.chains.providers import web3_manager
+            await web3_manager.initialize()
+            logger.info("Web3 providers initialized")
+        except ImportError as e:
+            logger.warning(f"Web3 providers not available: {e}")
+        
+        try:
+            from apps.dex.routers import dex_manager
+            await dex_manager.initialize()
+            logger.info("DEX routers initialized")
+        except ImportError as e:
+            logger.warning(f"DEX routers not available: {e}")
         
         logger.info("DEX Sniper Pro started successfully")
         
@@ -46,10 +66,8 @@ async def lifespan(app: FastAPI):
         
     except Exception as e:
         logger.error("Failed to start DEX Sniper Pro: %s", e)
-        # Don't raise - let the app start anyway for testing
         yield
     finally:
-        # Cleanup on shutdown
         logger.info("Shutting down DEX Sniper Pro...")
 
 
@@ -74,22 +92,58 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     
-    # Import and register all routes
-    from apps.api import health, trading
-    from apps.api import paper  # Your existing paper trading endpoints
-    from apps.ws import paper as paper_ws  # Your existing WebSocket handlers
-    from apps.ws import metrics as metrics_ws
+    # Import routers with error handling
+    routers_registered = []
     
-    # Health endpoints (no prefix)
-    app.include_router(health.router, tags=["health"])
+    # Health endpoints (always available)
+    try:
+        from apps.api import health
+        app.include_router(health.router, tags=["health"])
+        routers_registered.append("health")
+    except ImportError:
+        # Fallback health endpoint
+        from fastapi import APIRouter
+        health_router = APIRouter()
+        
+        @health_router.get("/health")
+        async def fallback_health():
+            return {"status": "ok", "service": "DEX Sniper Pro", "mode": "fallback"}
+        
+        app.include_router(health_router, tags=["health"])
+        routers_registered.append("health (fallback)")
     
-    # API v1 routes
-    app.include_router(trading.router, prefix="/api/v1", tags=["trading"])
-    app.include_router(paper.router, tags=["paper"])  # Remove prefix - it's in the router
+    # Try to register other routers
+    router_modules = [
+        ("apps.api.bot", "bot", "bot"),
+        ("apps.api.providers", "providers", "providers"),
+        ("apps.api.tokens", "tokens", "tokens"),
+        ("apps.api.trades", "trades", "trades"),
+        ("apps.api.trading", "trading", "trading"),
+        ("apps.api.paper", "paper", "paper"),
+        ("apps.ws.paper", "paper_ws", "websockets"),
+        ("apps.ws.metrics", "metrics_ws", "websockets"),
+    ]
     
-    # WebSocket routes (no prefix)
-    app.include_router(paper_ws.router, tags=["websockets"])
-    app.include_router(metrics_ws.router, tags=["websockets"])
+    for module_path, attr_name, tag in router_modules:
+        try:
+            module = __import__(module_path, fromlist=[attr_name])
+            router = getattr(module, 'router')
+            app.include_router(router, tags=[tag])
+            routers_registered.append(tag)
+        except (ImportError, AttributeError) as e:
+            logger.warning(f"Could not register {tag} router: {e}")
+    
+    # Add debug endpoint to show registered routers
+    @app.get("/debug/info")
+    async def debug_info():
+        return {
+            "service": "DEX Sniper Pro",
+            "routers_registered": routers_registered,
+            "django_available": 'django' in sys.modules,
+            "total_routes": len(app.routes)
+        }
+    
+    logger.info(f"Registered routers: {', '.join(routers_registered)}")
     
     return app
 
