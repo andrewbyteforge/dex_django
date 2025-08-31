@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { Container, Row, Col, Nav, Tab, Card, Button, Alert, Spinner, Table } from 'react-bootstrap';
 import { PaperTradeCard } from './components/PaperTradeCard.jsx';
 import { TokenModal } from './components/TokenModal.jsx';
+import { DiscoveryCard } from './components/DiscoveryCard.jsx';
+import { LiveOpportunitiesCard } from './components/LiveOpportunitiesCard.jsx';
 import { useDjangoData, useBotControl, useDjangoMutations } from './hooks/useDjangoApi.js';
 
 export default function App() {
@@ -86,6 +88,7 @@ export default function App() {
             setTokenError(errorData);
         }
     };
+
     const handleStartBot = async () => {
         try {
             await startBot();
@@ -113,6 +116,11 @@ export default function App() {
                             <Nav.Item>
                                 <Nav.Link eventKey="dashboard">
                                     📊 Dashboard
+                                </Nav.Link>
+                            </Nav.Item>
+                            <Nav.Item>
+                                <Nav.Link eventKey="discovery">
+                                    🔍 Discovery
                                 </Nav.Link>
                             </Nav.Item>
                             <Nav.Item>
@@ -213,6 +221,11 @@ export default function App() {
                                 </Row>
                             </Tab.Pane>
 
+                            {/* Discovery Tab */}
+                            <Tab.Pane eventKey="discovery">
+                                <LiveOpportunitiesCard />
+                            </Tab.Pane>
+
                             {/* Paper Trading Tab */}
                             <Tab.Pane eventKey="paper-trading">
                                 <PaperTradeCard />
@@ -261,21 +274,21 @@ export default function App() {
                                 <Card>
                                     <Card.Header className="d-flex justify-content-between align-items-center">
                                         <strong>Token Management</strong>
-                                        <Button variant="primary" size="sm">Add Token</Button>
+                                        <Button
+                                            variant="primary"
+                                            size="sm"
+                                            onClick={() => setShowTokenModal(true)}
+                                        >
+                                            Add Token
+                                        </Button>
                                     </Card.Header>
                                     <Card.Body>
                                         {tokensLoading && <Spinner />}
                                         {tokensError && <Alert variant="danger">{fmtError(tokensError)}</Alert>}
+                                        {tokenError && <Alert variant="danger">{fmtError(tokenError)}</Alert>}
                                         <TokensTable
                                             tokens={tokens?.results || []}
-                                            onRemove={async (id) => {
-                                                try {
-                                                    await tokenMutations.remove(id);
-                                                    refreshTokens();
-                                                } catch (error) {
-                                                    console.error('Failed to remove token:', error);
-                                                }
-                                            }}
+                                            onRemove={handleRemoveToken}
                                         />
                                     </Card.Body>
                                 </Card>
@@ -343,6 +356,14 @@ export default function App() {
                             </Tab.Pane>
                         </Tab.Content>
                     </Tab.Container>
+
+                    {/* Token Modal */}
+                    <TokenModal
+                        show={showTokenModal}
+                        onHide={() => setShowTokenModal(false)}
+                        onSubmit={handleAddToken}
+                        error={tokenError}
+                    />
                 </Col>
             </Row>
         </Container>

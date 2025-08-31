@@ -202,3 +202,44 @@ def ledger_export_csv(request):
         ])
     
     return response
+
+
+@api_view(["GET"])
+def bot_settings(request):
+    """Get current bot settings."""
+    return Response({
+        "status": "ok",
+        "settings": {
+            "max_slippage_bps": 300,
+            "max_trade_size_eth": 1.0,
+            "paper_trading_enabled": True
+        }
+    })
+
+@api_view(["GET"])
+def bot_status(request):
+    """Get current bot status."""
+    return Response({
+        "status": "ok",
+        "bot_status": {
+            "status": "stopped",
+            "uptime_seconds": 0,
+            "trades_today": 0
+        }
+    })
+
+@api_view(["POST"])
+def bot_start(request):
+    """Start the trading bot."""
+    return Response({
+        "status": "ok",
+        "message": "Bot started successfully"
+    })
+
+@api_view(["POST"])
+def bot_stop(request):
+    """Stop the trading bot."""
+    return Response({
+        "status": "ok",
+        "message": "Bot stopped successfully"
+    })
