@@ -10,6 +10,7 @@ import httpx
 from web3 import AsyncWeb3, AsyncHTTPProvider
 from web3.exceptions import Web3Exception
 
+# Using your existing Django storage models
 from apps.storage.models import Provider
 
 logger = logging.getLogger("api")
@@ -84,7 +85,15 @@ class Web3ProviderManager:
     async def initialize(self) -> None:
         """Initialize Web3 providers from database configuration."""
         try:
-            # Load RPC providers from database
+            # Load RPC providers from your existing Django models
+            from django.core.management import setup_environ
+            import django
+            from django.conf import settings
+            
+            # Initialize Django ORM for FastAPI
+            if not settings.configured:
+                django.setup()
+            
             rpc_providers = Provider.objects.filter(
                 kind=Provider.Kind.RPC,
                 enabled=True
@@ -170,39 +179,6 @@ class Web3ProviderManager:
         await self._health_check_chain(chain)
         return providers[0] if providers else None
     
-    async def _health_check_chain(self, chain: str) -> None:
-        """Perform health check on all providers for a chain."""
-        if chain not in self._providers:
-            return
-        
-        providers = self._providers[chain]
-        health_status = {}
-        
-        for i, provider in enumerate(providers):
-            try:
-                await asyncio.wait_for(provider.eth.get_block_number(), timeout=3.0)
-                health_status[i] = True
-            except Exception:
-                health_status[i] = False
-        
-        self._provider_health[chain] = health_status
-        healthy_count = sum(health_status.values())
-        
-        logger.info("Health check for %s: %d/%d providers healthy", 
-                   chain, healthy_count, len(providers))
-    
-    async def get_block_number(self, chain: str) -> Optional[int]:
-        """Get current block number for a chain."""
-        provider = await self.get_provider(chain)
-        if not provider:
-            return None
-        
-        try:
-            return await provider.eth.get_block_number()
-        except Exception as e:
-            logger.warning("Failed to get block number for %s: %s", chain, e)
-            return None
-    
     async def get_balance(self, chain: str, address: str) -> Optional[Decimal]:
         """Get native token balance for an address."""
         provider = await self.get_provider(chain)
@@ -215,23 +191,6 @@ class Web3ProviderManager:
             return Decimal(balance_wei) / Decimal(10 ** config.native_decimals)
         except Exception as e:
             logger.warning("Failed to get balance for %s on %s: %s", address, chain, e)
-            return None
-    
-    async def estimate_gas_price(self, chain: str) -> Optional[Dict[str, int]]:
-        """Estimate current gas price for a chain."""
-        provider = await self.get_provider(chain)
-        if not provider:
-            return None
-        
-        try:
-            gas_price = await provider.eth.gas_price
-            return {
-                "standard": gas_price,
-                "fast": int(gas_price * 1.2),
-                "fastest": int(gas_price * 1.5),
-            }
-        except Exception as e:
-            logger.warning("Failed to estimate gas price for %s: %s", chain, e)
             return None
     
     def get_chain_config(self, chain: str) -> Optional[ChainConfig]:

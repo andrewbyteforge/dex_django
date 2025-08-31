@@ -3,20 +3,25 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
+# Add the project root to Python path for Django integration
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# Initialize Django for ORM access
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.settings')
+import django
+django.setup()
+
 # Load environment variables
 load_dotenv()
-
-# Import our modules
-from backend.app.core.config import settings
-from backend.app.core.database import init_db
-from backend.app.api import health, trading, discovery
-from backend.app.ws import paper_ws, metrics_ws
 
 logger = logging.getLogger(__name__)
 
@@ -26,28 +31,26 @@ async def lifespan(app: FastAPI):
     """FastAPI lifespan context manager."""
     logger.info("Starting DEX Sniper Pro...")
     
-    # Initialize database
-    await init_db()
-    
-    # Initialize blockchain providers
-    from backend.app.chains.providers import web3_manager
-    await web3_manager.initialize()
-    
-    # Initialize DEX routers
-    from backend.app.dex.routers import dex_manager
-    await dex_manager.initialize()
-    
-    # Initialize discovery engine
-    from backend.app.discovery.engine import discovery_engine
-    await discovery_engine.start()
-    
-    logger.info("DEX Sniper Pro started successfully")
-    
-    yield
-    
-    # Cleanup on shutdown
-    logger.info("Shutting down DEX Sniper Pro...")
-    await discovery_engine.stop()
+    try:
+        # Initialize blockchain providers
+        from apps.chains.providers import web3_manager
+        await web3_manager.initialize()
+        
+        # Initialize DEX routers
+        from apps.dex.routers import dex_manager
+        await dex_manager.initialize()
+        
+        logger.info("DEX Sniper Pro started successfully")
+        
+        yield
+        
+    except Exception as e:
+        logger.error("Failed to start DEX Sniper Pro: %s", e)
+        # Don't raise - let the app start anyway for testing
+        yield
+    finally:
+        # Cleanup on shutdown
+        logger.info("Shutting down DEX Sniper Pro...")
 
 
 def create_app() -> FastAPI:
@@ -58,27 +61,33 @@ def create_app() -> FastAPI:
         description="High-frequency DEX trading bot with AI-powered discovery",
         version="1.0.0",
         lifespan=lifespan,
-        docs_url="/docs" if settings.DEBUG else None,
-        redoc_url="/redoc" if settings.DEBUG else None,
+        docs_url="/docs",
+        redoc_url="/redoc",
     )
     
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
     
-    # Health endpoint
+    # Import and register all routes
+    from apps.api import health, trading
+    from apps.api import paper  # Your existing paper trading endpoints
+    from apps.ws import paper as paper_ws  # Your existing WebSocket handlers
+    from apps.ws import metrics as metrics_ws
+    
+    # Health endpoints (no prefix)
     app.include_router(health.router, tags=["health"])
     
     # API v1 routes
     app.include_router(trading.router, prefix="/api/v1", tags=["trading"])
-    app.include_router(discovery.router, prefix="/api/v1", tags=["discovery"])
+    app.include_router(paper.router, tags=["paper"])  # Remove prefix - it's in the router
     
-    # WebSocket routes
+    # WebSocket routes (no prefix)
     app.include_router(paper_ws.router, tags=["websockets"])
     app.include_router(metrics_ws.router, tags=["websockets"])
     

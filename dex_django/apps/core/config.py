@@ -18,9 +18,6 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = Field(default="/api/v1")
     CORS_ORIGINS: List[str] = Field(default=["http://localhost:5173", "http://127.0.0.1:5173"])
     
-    # Database
-    DATABASE_URL: str = Field(default="sqlite+aiosqlite:///./data/dex_sniper.db")
-    
     # Trading
     DEFAULT_SLIPPAGE_BPS: int = Field(default=300)  # 3%
     MAX_SLIPPAGE_BPS: int = Field(default=1000)     # 10%

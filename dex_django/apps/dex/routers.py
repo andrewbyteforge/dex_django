@@ -9,7 +9,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from web3 import AsyncWeb3
 from web3.contract import AsyncContract
 from web3.exceptions import ContractLogicError, Web3Exception
+from django.db import models
 
+# Using your existing apps structure
 from apps.chains.providers import web3_manager, ChainConfig
 from apps.storage.models import Token, Pair
 
@@ -218,11 +220,17 @@ class UniswapV2Router:
         return None
     
     async def _pair_exists(self, token_a: str, token_b: str) -> bool:
-        """Check if a trading pair exists."""
+        """Check if a trading pair exists using your Django models."""
         try:
-            # Check database first
+            # Initialize Django ORM if needed
+            import django
+            from django.conf import settings
+            if not settings.configured:
+                django.setup()
+            
+            # Check database first using your existing Pair model
             pair = Pair.objects.filter(
-                chain=self.chain,
+                chain__name=self.chain,
                 dex=self.dex_name.lower()
             ).filter(
                 models.Q(
@@ -241,10 +249,16 @@ class UniswapV2Router:
             return True
     
     async def _get_token_info(self, address: str) -> Optional[Token]:
-        """Get token information from database."""
+        """Get token information from your Django database."""
         try:
+            # Initialize Django ORM if needed
+            import django
+            from django.conf import settings
+            if not settings.configured:
+                django.setup()
+            
             return Token.objects.filter(
-                chain=self.chain,
+                chain__name=self.chain,
                 address__iexact=address
             ).first()
         except Exception:
@@ -263,7 +277,7 @@ class UniswapV2Router:
         try:
             chain_config = web3_manager.get_chain_config(self.chain)
             if not chain_config:
-                return chain_config.gas_limit_default
+                return 300000
             
             # Use different methods based on whether we're swapping ETH/native token
             is_eth_in = token_in.lower() == chain_config.weth_address.lower()
