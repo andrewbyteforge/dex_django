@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Container, Row, Col, Nav, Tab, Card, Button, Alert, Spinner, Table } from 'react-bootstrap';
 import { PaperTradeCard } from './components/PaperTradeCard.jsx';
+import { AIThoughtLogPanel } from './components/AIThoughtLogPanel.jsx';
+import { PaperTradingDashboard } from './components/PaperTradingDashboard.jsx';
 import { TokenModal } from './components/TokenModal.jsx';
 import { DiscoveryCard } from './components/DiscoveryCard.jsx';
 import { LiveOpportunitiesCard } from './components/LiveOpportunitiesCard.jsx';
@@ -8,13 +10,13 @@ import { useDjangoData, useBotControl, useDjangoMutations } from './hooks/useDja
 import { DashboardHeader } from './components/DashboardHeader';
 import { WalletConnectButton } from './components/WalletConnectButton';
 import { WalletStatusBar } from './components/WalletStatusBar';
-import { IntelligencePanel } from './components/IntelligencePanel'; // <-- added
+import { IntelligencePanel } from './components/IntelligencePanel';
 
 export default function App() {
     const [activeTab, setActiveTab] = useState('dashboard');
     const [showTokenModal, setShowTokenModal] = useState(false);
-    const [tradingMode, setTradingMode] = useState('paper'); // 'paper' or 'manual'
-    const [liveOpportunities, setLiveOpportunities] = useState([]); // <-- added
+    const [tradingMode, setTradingMode] = useState('paper');
+    const [liveOpportunities, setLiveOpportunities] = useState([]);
 
     // Django API hooks
     const {
@@ -58,6 +60,14 @@ export default function App() {
 
     const canPrev = tradesHasPrev;
     const canNext = tradesHasNext;
+
+    // Helper function for error formatting
+    const fmtError = (error) => {
+        if (typeof error === 'string') return error;
+        if (error?.message) return error.message;
+        if (error?.detail) return error.detail;
+        return JSON.stringify(error);
+    };
 
     // Token management handlers
     const handleAddToken = async (tokenData) => {
@@ -120,7 +130,6 @@ export default function App() {
 
     const handleExportLogs = () => {
         console.log('Export logs triggered');
-        // Add log export logic here
         alert('Log export functionality coming soon!');
     };
 
@@ -232,37 +241,43 @@ export default function App() {
                                                         variant={tradingMode === 'manual' ? 'primary' : 'outline-secondary'}
                                                         onClick={() => setTradingMode('manual')}
                                                     >
-                                                        🔗 Manual Trading
+                                                        👤 Manual Trading
                                                     </Button>
-                                                    <Button variant="outline-warning" disabled>
-                                                        ⚡ Auto Trading (Coming Soon)
+                                                    <Button
+                                                        variant={tradingMode === 'auto' ? 'warning' : 'outline-secondary'}
+                                                        onClick={() => setTradingMode('auto')}
+                                                        disabled
+                                                    >
+                                                        🤖 Auto Trading (Soon)
                                                     </Button>
                                                 </div>
                                             </Card.Body>
                                         </Card>
 
-                                        <Card>
+                                        <Card className="mb-3">
                                             <Card.Header><strong>Quick Actions</strong></Card.Header>
-                                            <Card.Body className="d-grid gap-2">
-                                                <Button
-                                                    variant="success"
-                                                    disabled={botLoading || botStatus?.status === 'running'}
-                                                    onClick={handleStartBot}
-                                                >
-                                                    {botLoading ? 'Loading...' : 'Start Bot'}
-                                                </Button>
-                                                <Button
-                                                    variant="danger"
-                                                    disabled={botLoading || botStatus?.status !== 'running'}
-                                                    onClick={handleStopBot}
-                                                >
-                                                    {botLoading ? 'Loading...' : 'Stop Bot'}
-                                                </Button>
-                                                {botError && (
-                                                    <Alert variant="danger" className="mt-2">
-                                                        {fmtError(botError)}
-                                                    </Alert>
-                                                )}
+                                            <Card.Body>
+                                                <div className="d-grid gap-2">
+                                                    <Button
+                                                        variant="success"
+                                                        disabled={botLoading || botStatus?.status === 'running'}
+                                                        onClick={handleStartBot}
+                                                    >
+                                                        {botLoading ? 'Loading...' : 'Start Bot'}
+                                                    </Button>
+                                                    <Button
+                                                        variant="danger"
+                                                        disabled={botLoading || botStatus?.status !== 'running'}
+                                                        onClick={handleStopBot}
+                                                    >
+                                                        {botLoading ? 'Loading...' : 'Stop Bot'}
+                                                    </Button>
+                                                    {botError && (
+                                                        <Alert variant="danger" className="mt-2">
+                                                            {fmtError(botError)}
+                                                        </Alert>
+                                                    )}
+                                                </div>
                                             </Card.Body>
                                         </Card>
                                     </Col>
@@ -278,9 +293,30 @@ export default function App() {
                                 <LiveOpportunitiesCard />
                             </Tab.Pane>
 
-                            {/* Paper Trading Tab */}
+                            {/* Paper Trading Tab - Updated with AI Thought Log */}
                             <Tab.Pane eventKey="paper-trading">
-                                <PaperTradeCard />
+                                <Row>
+                                    <Col lg={4} className="mb-4">
+                                        <PaperTradeCard />
+
+                                        {/* Additional info card */}
+                                        <Card className="mt-3">
+                                            <Card.Body className="text-center">
+                                                <div className="text-muted small">
+                                                    <p className="mb-1">
+                                                        <strong>Paper Trading Mode:</strong> Practice trading with virtual funds
+                                                    </p>
+                                                    <p className="mb-0">
+                                                        All trades are simulated • No real money at risk • Same logic as live trading
+                                                    </p>
+                                                </div>
+                                            </Card.Body>
+                                        </Card>
+                                    </Col>
+                                    <Col lg={8}>
+                                        <AIThoughtLogPanel />
+                                    </Col>
+                                </Row>
                             </Tab.Pane>
 
                             {/* Trades Tab */}
@@ -298,7 +334,7 @@ export default function App() {
                                                 disabled={!canPrev}
                                                 onClick={tradesPrevPage}
                                             >
-                                                Prev
+                                                ← Prev
                                             </Button>
                                             <Button
                                                 size="sm"
@@ -306,16 +342,21 @@ export default function App() {
                                                 disabled={!canNext}
                                                 onClick={tradesNextPage}
                                             >
-                                                Next
+                                                Next →
                                             </Button>
                                         </div>
                                     </Card.Header>
                                     <Card.Body>
-                                        {tradesLoading && <Spinner />}
-                                        {tradesError && <Alert variant="danger">{fmtError(tradesError)}</Alert>}
-                                        {trades && trades.results && <TradesTable results={trades.results} />}
-                                        {!tradesLoading && trades?.results?.length === 0 && (
-                                            <div className="text-muted">No trades yet.</div>
+                                        {tradesLoading ? (
+                                            <div className="text-center py-3">
+                                                <Spinner animation="border" />
+                                            </div>
+                                        ) : tradesError ? (
+                                            <Alert variant="danger">
+                                                <strong>Error:</strong> {fmtError(tradesError)}
+                                            </Alert>
+                                        ) : (
+                                            <TradesTable results={trades?.results || []} />
                                         )}
                                     </Card.Body>
                                 </Card>
@@ -326,22 +367,27 @@ export default function App() {
                                 <Card>
                                     <Card.Header className="d-flex justify-content-between align-items-center">
                                         <strong>Token Management</strong>
-                                        <Button
-                                            variant="primary"
-                                            size="sm"
-                                            onClick={() => setShowTokenModal(true)}
-                                        >
-                                            Add Token
+                                        <Button size="sm" variant="primary" onClick={() => setShowTokenModal(true)}>
+                                            + Add Token
                                         </Button>
                                     </Card.Header>
                                     <Card.Body>
-                                        {tokensLoading && <Spinner />}
-                                        {tokensError && <Alert variant="danger">{fmtError(tokensError)}</Alert>}
-                                        {tokenError && <Alert variant="danger">{fmtError(tokenError)}</Alert>}
-                                        <TokensTable
-                                            tokens={tokens?.results || []}
-                                            onRemove={handleRemoveToken}
-                                        />
+                                        {tokensLoading ? (
+                                            <div className="text-center py-3">
+                                                <Spinner animation="border" />
+                                            </div>
+                                        ) : tokensError ? (
+                                            <Alert variant="danger">
+                                                <strong>Error:</strong> {fmtError(tokensError)}
+                                            </Alert>
+                                        ) : (
+                                            <TokensTable
+                                                tokens={tokens?.results || []}
+                                                onRemove={handleRemoveToken}
+                                                loading={tokenMutations.loading}
+                                                error={tokenError}
+                                            />
+                                        )}
                                     </Card.Body>
                                 </Card>
                             </Tab.Pane>
@@ -349,14 +395,21 @@ export default function App() {
                             {/* Providers Tab */}
                             <Tab.Pane eventKey="providers">
                                 <Card>
-                                    <Card.Header className="d-flex justify-content-between align-items-center">
+                                    <Card.Header>
                                         <strong>RPC Providers</strong>
-                                        <Button variant="primary" size="sm">Add Provider</Button>
                                     </Card.Header>
                                     <Card.Body>
-                                        {providersLoading && <Spinner />}
-                                        {providersError && <Alert variant="danger">{fmtError(providersError)}</Alert>}
-                                        <ProvidersTable providers={providers?.results || []} />
+                                        {providersLoading ? (
+                                            <div className="text-center py-3">
+                                                <Spinner animation="border" />
+                                            </div>
+                                        ) : providersError ? (
+                                            <Alert variant="danger">
+                                                <strong>Error:</strong> {fmtError(providersError)}
+                                            </Alert>
+                                        ) : (
+                                            <ProvidersTable providers={providers?.results || []} />
+                                        )}
                                     </Card.Body>
                                 </Card>
                             </Tab.Pane>
@@ -365,67 +418,18 @@ export default function App() {
                             <Tab.Pane eventKey="settings">
                                 <Row>
                                     <Col md={6}>
-                                        <Card className="mb-3">
+                                        <Card>
                                             <Card.Header><strong>Trading Settings</strong></Card.Header>
                                             <Card.Body>
-                                                <div className="mb-3">
-                                                    <label className="form-label">Trading Mode</label>
-                                                    <select
-                                                        className="form-select"
-                                                        value={tradingMode}
-                                                        onChange={(e) => setTradingMode(e.target.value)}
-                                                    >
-                                                        <option value="paper">📝 Paper Trading</option>
-                                                        <option value="manual">🔗 Manual Trading</option>
-                                                        <option value="auto" disabled>⚡ Auto Trading (Coming Soon)</option>
-                                                    </select>
-                                                </div>
-                                                <div className="mb-3">
-                                                    <label className="form-label">Max Slippage (%)</label>
-                                                    <input type="number" className="form-control" defaultValue="3" />
-                                                </div>
-                                                <div className="mb-3">
-                                                    <label className="form-label">Max Trade Size (ETH)</label>
-                                                    <input type="number" className="form-control" defaultValue="1.0" />
-                                                </div>
-                                                <div className="mb-3">
-                                                    <label className="form-label">Gas Price Multiplier</label>
-                                                    <input type="number" className="form-control" defaultValue="1.2" step="0.1" />
-                                                </div>
+                                                <div className="text-muted">Trading settings will appear here...</div>
                                             </Card.Body>
                                         </Card>
                                     </Col>
                                     <Col md={6}>
-                                        <Card className="mb-3">
+                                        <Card>
                                             <Card.Header><strong>Risk Management</strong></Card.Header>
                                             <Card.Body>
-                                                <div className="mb-3">
-                                                    <label className="form-label">Min Liquidity (USD)</label>
-                                                    <input type="number" className="form-control" defaultValue="10000" />
-                                                </div>
-                                                <div className="mb-3">
-                                                    <label className="form-label">Max Daily Trades</label>
-                                                    <input type="number" className="form-control" defaultValue="50" />
-                                                </div>
-                                                <div className="form-check">
-                                                    <input className="form-check-input" type="checkbox" id="autoStop" />
-                                                    <label className="form-check-label" htmlFor="autoStop">
-                                                        Auto-stop on high loss
-                                                    </label>
-                                                </div>
-                                            </Card.Body>
-                                        </Card>
-
-                                        <Card>
-                                            <Card.Header><strong>Wallet Integration</strong></Card.Header>
-                                            <Card.Body>
-                                                <div className="mb-3">
-                                                    <WalletConnectButton />
-                                                </div>
-                                                <div className="small text-muted">
-                                                    Connect your wallet to enable manual trading mode.
-                                                    Paper trading mode requires no wallet connection.
-                                                </div>
+                                                <div className="text-muted">Risk settings will appear here...</div>
                                             </Card.Body>
                                         </Card>
                                     </Col>
@@ -500,11 +504,11 @@ function TradesTable({ results }) {
 
 function TokensTable({ tokens, onRemove, loading, error }) {
     if (!tokens || tokens.length === 0) {
-        return <div className="text-muted">No tokens configured. Add tokens to start tracking.</div>;
+        return <div className="text-muted">No tokens configured.</div>;
     }
 
     return (
-        <Table striped bordered hover size="sm">
+        <Table striped hover size="sm">
             <thead>
                 <tr>
                     <th>Symbol</th>
@@ -518,19 +522,19 @@ function TokensTable({ tokens, onRemove, loading, error }) {
                 {tokens.map((token) => (
                     <tr key={token.id}>
                         <td><strong>{token.symbol}</strong></td>
-                        <td>{token.name || '-'}</td>
-                        <td><span className="badge bg-secondary">{token.chain}</span></td>
-                        <td className="text-truncate" style={{ maxWidth: 150 }}>
-                            <small>{token.address.slice(0, 10)}...{token.address.slice(-6)}</small>
+                        <td>{token.name}</td>
+                        <td>{token.chain}</td>
+                        <td className="font-monospace text-truncate" style={{ maxWidth: 150 }}>
+                            {token.address}
                         </td>
                         <td>
                             <Button
                                 size="sm"
                                 variant="outline-danger"
-                                onClick={() => onRemove && onRemove(token.id, token.symbol)}
+                                onClick={() => onRemove(token.id, token.symbol)}
                                 disabled={loading}
                             >
-                                {loading ? <Spinner size="sm" /> : 'Remove'}
+                                Remove
                             </Button>
                         </td>
                     </tr>
@@ -542,49 +546,37 @@ function TokensTable({ tokens, onRemove, loading, error }) {
 
 function ProvidersTable({ providers }) {
     if (!providers || providers.length === 0) {
-        return <div className="text-muted">No providers configured. Add RPC providers for blockchain connectivity.</div>;
+        return <div className="text-muted">No providers configured.</div>;
     }
 
     return (
-        <Table striped bordered hover size="sm">
+        <Table striped hover size="sm">
             <thead>
                 <tr>
                     <th>Name</th>
-                    <th>Type</th>
+                    <th>Kind</th>
                     <th>URL</th>
                     <th>Status</th>
-                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
                 {providers.map((provider) => (
                     <tr key={provider.id}>
                         <td><strong>{provider.name}</strong></td>
-                        <td><span className="badge bg-info">{provider.kind}</span></td>
-                        <td className="text-truncate" style={{ maxWidth: 200 }}>
+                        <td>
+                            <span className="badge bg-secondary">{provider.kind}</span>
+                        </td>
+                        <td className="text-truncate font-monospace" style={{ maxWidth: 200 }}>
                             {provider.url}
                         </td>
                         <td>
                             <span className={`badge bg-${provider.enabled ? 'success' : 'secondary'}`}>
-                                {provider.enabled ? 'Active' : 'Disabled'}
+                                {provider.enabled ? 'Enabled' : 'Disabled'}
                             </span>
-                        </td>
-                        <td>
-                            <Button size="sm" variant="outline-secondary">Edit</Button>
                         </td>
                     </tr>
                 ))}
             </tbody>
         </Table>
     );
-}
-
-function fmtError(e) {
-    try {
-        const data = e?.response?.data || {};
-        const trace = e?.response?.headers?.["x-trace-id"];
-        return `${JSON.stringify(data)}${trace ? ` (trace ${trace})` : ""}`;
-    } catch {
-        return String(e);
-    }
 }
