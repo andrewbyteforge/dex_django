@@ -1,214 +1,130 @@
 import { useState, useEffect } from 'react';
-import { Card, Button, Badge, Alert, Spinner } from 'react-bootstrap';
-import { useDjangoApi } from '../hooks/useDjangoApi.js';
-import { useWebSocket } from '../hooks/useWebSocket.js';
+import { Card, Button, Alert, Badge, Form } from 'react-bootstrap';
+import { useDjangoData, djangoApi } from '../hooks/useDjangoApi';
+import { useWebSocket } from '../hooks/useWebSocket';
 
 export function PaperTradeCard() {
     const [paperEnabled, setPaperEnabled] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
-    const [thoughtLogs, setThoughtLogs] = useState([]);
-    const [metrics, setMetrics] = useState(null);
 
-    const api = useDjangoApi();
-    const { connected, lastMessage } = useWebSocket('/ws/paper');
+    // Use useDjangoData instead of useDjangoApi
+    const {
+        data: paperMetrics,
+        refresh: refreshMetrics
+    } = useDjangoData('/api/v1/metrics/paper', {
+        total_trades: 0,
+        winning_trades: 0,
+        total_pnl: 0,
+        win_rate: 0
+    });
 
-    // Handle WebSocket messages
+    // WebSocket for real-time updates
+    const { lastMessage } = useWebSocket('/ws/paper');
+
     useEffect(() => {
-        if (!lastMessage) return;
-
-        try {
-            const msg = JSON.parse(lastMessage.data);
-
-            switch (msg.type) {
-                case 'hello':
-                    setPaperEnabled(msg.payload?.paper_enabled || false);
-                    break;
-                case 'status':
-                    setPaperEnabled(msg.payload?.paper_enabled || false);
-                    break;
-                case 'thought_log':
-                    setThoughtLogs(prev => [msg, ...prev].slice(0, 10)); // Keep last 10
-                    break;
-                case 'paper_metrics':
-                    setMetrics(msg.payload);
-                    break;
-                default:
-                    console.debug('Unhandled WS message:', msg.type);
+        if (lastMessage) {
+            const data = JSON.parse(lastMessage.data);
+            if (data.type === 'hello') {
+                setPaperEnabled(data.payload.paper_enabled);
             }
-        } catch (err) {
-            console.warn('Failed to parse WebSocket message:', err);
         }
     }, [lastMessage]);
 
-    // Toggle paper trading mode
-    const handleToggle = async () => {
+    const togglePaper = async () => {
         setLoading(true);
         setError(null);
 
         try {
-            const response = await api.post('/api/v1/paper/toggle', {
-                enabled: !paperEnabled
-            });
-
-            if (response.data?.status === 'ok') {
-                setPaperEnabled(response.data.paper_enabled);
-            }
+            const response = await djangoApi.post('/api/v1/paper/toggle');
+            setPaperEnabled(response.data.enabled);
+            refreshMetrics(); // Refresh metrics after toggle
         } catch (err) {
-            setError(`Failed to toggle paper trading: ${err.response?.data?.error || err.message}`);
+            setError(err.response?.data?.error || 'Failed to toggle paper trading');
+            console.error('Paper trading toggle failed:', err);
         } finally {
             setLoading(false);
         }
     };
 
-    // Test thought log
-    const handleTestThoughtLog = async () => {
+    const testThoughtLog = async () => {
+        setLoading(true);
+        setError(null);
+
         try {
-            await api.post('/api/v1/paper/thought-log/test');
+            await djangoApi.post('/api/v1/paper/thought-log/test');
+            refreshMetrics();
         } catch (err) {
-            console.error('Failed to emit test thought log:', err);
+            setError(err.response?.data?.error || 'Thought log test failed');
+            console.error('Thought log test failed:', err);
+        } finally {
+            setLoading(false);
         }
     };
 
     return (
-        <Card className="mb-3">
+        <Card className="mb-4">
             <Card.Header className="d-flex justify-content-between align-items-center">
                 <div className="d-flex align-items-center gap-2">
-                    <strong>Paper Trading</strong>
-                    {paperEnabled && <Badge bg="success">Active</Badge>}
-                    {!connected && <Badge bg="warning">Disconnected</Badge>}
+                    <strong>📝 Paper Trading</strong>
+                    <Badge bg={paperEnabled ? 'success' : 'secondary'}>
+                        {paperEnabled ? 'ENABLED' : 'DISABLED'}
+                    </Badge>
                 </div>
-                <div className="d-flex gap-2">
-                    <Button
-                        variant="outline-primary"
-                        size="sm"
-                        onClick={handleTestThoughtLog}
-                        disabled={!connected}
-                    >
-                        Test AI Log
-                    </Button>
-                    <Button
-                        variant={paperEnabled ? "danger" : "success"}
-                        size="sm"
-                        onClick={handleToggle}
-                        disabled={loading}
-                    >
-                        {loading && <Spinner size="sm" className="me-1" />}
-                        {paperEnabled ? "Stop Paper" : "Start Paper"}
-                    </Button>
-                </div>
+                <Form.Check
+                    type="switch"
+                    id="paper-trading-switch"
+                    checked={paperEnabled}
+                    onChange={togglePaper}
+                    disabled={loading}
+                />
             </Card.Header>
 
             <Card.Body>
                 {error && (
                     <Alert variant="danger" className="mb-3">
-                        {error}
+                        <strong>Error:</strong> {error}
                     </Alert>
                 )}
 
-                {/* Connection Status */}
-                <div className="mb-3">
-                    <small className="text-muted">
-                        WebSocket: {connected ? "Connected" : "Disconnected"}
-                    </small>
-                </div>
-
-                {/* Paper Metrics */}
-                {metrics && (
-                    <div className="row mb-3">
-                        <div className="col-md-3">
-                            <div className="text-center">
-                                <div className="fw-bold">Session P&L</div>
-                                <div className={`fs-5 ${metrics.session_pnl_gbp >= 0 ? 'text-success' : 'text-danger'}`}>
-                                    £{metrics.session_pnl_gbp?.toFixed(2) || '0.00'}
-                                </div>
-                            </div>
-                        </div>
-                        <div className="col-md-3">
-                            <div className="text-center">
-                                <div className="fw-bold">Trades</div>
-                                <div className="fs-5">{metrics.session_trades || 0}</div>
-                            </div>
-                        </div>
-                        <div className="col-md-3">
-                            <div className="text-center">
-                                <div className="fw-bold">Win Rate</div>
-                                <div className="fs-5">{(metrics.win_rate * 100)?.toFixed(1) || '0.0'}%</div>
-                            </div>
-                        </div>
-                        <div className="col-md-3">
-                            <div className="text-center">
-                                <div className="fw-bold">Max DD</div>
-                                <div className="fs-5 text-danger">
-                                    £{Math.abs(metrics.max_drawdown_gbp || 0).toFixed(2)}
-                                </div>
-                            </div>
+                <div className="row text-center mb-3">
+                    <div className="col-6 col-md-3">
+                        <div className="fw-bold">Total Trades</div>
+                        <div className="fs-5">{paperMetrics.total_trades || 0}</div>
+                    </div>
+                    <div className="col-6 col-md-3">
+                        <div className="fw-bold">Winning</div>
+                        <div className="fs-5 text-success">{paperMetrics.winning_trades || 0}</div>
+                    </div>
+                    <div className="col-6 col-md-3">
+                        <div className="fw-bold">Win Rate</div>
+                        <div className="fs-5">{(paperMetrics.win_rate || 0).toFixed(1)}%</div>
+                    </div>
+                    <div className="col-6 col-md-3">
+                        <div className="fw-bold">Total P&L</div>
+                        <div className={`fs-5 ${(paperMetrics.total_pnl || 0) >= 0 ? 'text-success' : 'text-danger'}`}>
+                            ${(paperMetrics.total_pnl || 0).toFixed(2)}
                         </div>
                     </div>
-                )}
-
-                {/* AI Thought Log */}
-                <div>
-                    <h6 className="mb-2">AI Thought Log</h6>
-                    {thoughtLogs.length === 0 ? (
-                        <div className="text-muted small">
-                            No recent thoughts. Enable paper trading to see AI reasoning.
-                        </div>
-                    ) : (
-                        <div className="thought-log-container" style={{ maxHeight: '300px', overflowY: 'auto' }}>
-                            {thoughtLogs.map((log, idx) => (
-                                <ThoughtLogEntry key={`${log.timestamp}-${idx}`} log={log} />
-                            ))}
-                        </div>
-                    )}
                 </div>
+
+                <div className="d-flex gap-2 justify-content-center">
+                    <Button
+                        variant="outline-primary"
+                        size="sm"
+                        onClick={testThoughtLog}
+                        disabled={loading || !paperEnabled}
+                    >
+                        {loading ? 'Testing...' : 'Test AI Thought Log'}
+                    </Button>
+                </div>
+
+                {!paperEnabled && (
+                    <div className="text-center text-muted mt-3">
+                        <small>Enable paper trading to practice with virtual funds</small>
+                    </div>
+                )}
             </Card.Body>
         </Card>
-    );
-}
-
-function ThoughtLogEntry({ log }) {
-    const payload = log.payload || {};
-    const opportunity = payload.opportunity || {};
-    const decision = payload.decision || {};
-    const riskGates = payload.risk_gates || {};
-
-    const isPositiveDecision = decision.action?.includes('buy') || decision.action?.includes('enter');
-
-    return (
-        <div className="border rounded p-2 mb-2 bg-light">
-            <div className="d-flex justify-content-between align-items-start mb-1">
-                <div className="d-flex align-items-center gap-2">
-                    <Badge bg={isPositiveDecision ? "success" : "secondary"}>
-                        {opportunity.symbol || 'Unknown'}
-                    </Badge>
-                    <small className="text-muted">
-                        {opportunity.chain} • {opportunity.dex}
-                    </small>
-                </div>
-                <small className="text-muted">
-                    {new Date(log.timestamp).toLocaleTimeString()}
-                </small>
-            </div>
-
-            {decision.rationale && (
-                <div className="small mb-1">
-                    <strong>Decision:</strong> {decision.action} - {decision.rationale}
-                </div>
-            )}
-
-            {payload.discovery_signals && (
-                <div className="small text-muted">
-                    Liq: ${payload.discovery_signals.liquidity_usd?.toLocaleString()} •
-                    Trend: {(payload.discovery_signals.trend_score * 100)?.toFixed(0)}%
-                </div>
-            )}
-
-            {(riskGates.buy_tax || riskGates.sell_tax) && (
-                <div className="small text-muted">
-                    Tax: {(riskGates.buy_tax * 100)?.toFixed(1)}%/{(riskGates.sell_tax * 100)?.toFixed(1)}%
-                </div>
-            )}
-        </div>
     );
 }

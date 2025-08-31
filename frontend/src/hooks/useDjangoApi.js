@@ -1,24 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
-// Django runs on port 8000 by default
-const DJANGO_API_BASE = import.meta.env.VITE_DJANGO_API_BASE || 'http://127.0.0.1:8000';
+const API_BASE = 'http://127.0.0.1:8000';
 
-// Create Django API client
 const djangoApi = axios.create({
-    baseURL: DJANGO_API_BASE,
-    timeout: 10000,
-    headers: {
-        'Content-Type': 'application/json',
-        // Add X-API-Key header if needed for Django auth
-        // 'X-API-Key': 'your-api-key-here'
-    },
+    baseURL: API_BASE,
+    timeout: 30000,
 });
 
-// Response interceptor for Django API
+// Response interceptor
 djangoApi.interceptors.response.use(
     (response) => {
-        console.debug(`Django API Response: ${response.status} ${response.config.url}`);
+        console.log(`Django API Response: ${response.status} ${response.config.url}`);
         return response;
     },
     (error) => {
@@ -27,154 +20,91 @@ djangoApi.interceptors.response.use(
     }
 );
 
-export function useDjangoApi() {
-    return djangoApi;
-}
-
-// Hook for fetching paginated data from Django REST API
-export function useDjangoData(endpoint, dependencies = []) {
-    const [data, setData] = useState(null);
-    const [loading, setLoading] = useState(false);
+export function useDjangoData(endpoint, initialData = []) {
+    const [data, setData] = useState(initialData);
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [page, setPage] = useState(1);
 
-    const fetchData = useCallback(async (pageNum = 1) => {
+    const fetchData = useCallback(async () => {
+        if (!endpoint) return;
+
         setLoading(true);
         setError(null);
 
         try {
-            const response = await djangoApi.get(`${endpoint}?page=${pageNum}`);
+            const response = await djangoApi.get(endpoint);
             setData(response.data);
-            setPage(pageNum);
         } catch (err) {
-            setError(err);
             console.error(`Failed to fetch ${endpoint}:`, err);
+            setError(err);
+
+            // Don't clear existing data on error, keep stale data visible
+            if (!data || (Array.isArray(data) && data.length === 0)) {
+                setData(initialData);
+            }
         } finally {
             setLoading(false);
         }
-    }, [endpoint]);
-
-    useEffect(() => {
-        fetchData(1);
-    }, [fetchData, ...dependencies]);
-
-    const nextPage = useCallback(() => {
-        if (data?.next) {
-            fetchData(page + 1);
-        }
-    }, [fetchData, page, data?.next]);
-
-    const prevPage = useCallback(() => {
-        if (data?.previous) {
-            fetchData(page - 1);
-        }
-    }, [fetchData, page, data?.previous]);
+    }, [endpoint]); // Fixed: removed data from dependencies to prevent infinite loops
 
     const refresh = useCallback(() => {
-        fetchData(page);
-    }, [fetchData, page]);
+        return fetchData();
+    }, [fetchData]);
 
-    return {
-        data,
-        loading,
-        error,
-        page,
-        hasNext: !!data?.next,
-        hasPrev: !!data?.previous,
-        nextPage,
-        prevPage,
-        refresh,
-        refetch: fetchData,
-    };
+    useEffect(() => {
+        fetchData();
+    }, [fetchData]);
+
+    return { data, loading, error, refresh };
 }
 
-// Hook for bot control (start/stop/status)
 export function useBotControl() {
     const [botStatus, setBotStatus] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 
     const fetchStatus = useCallback(async () => {
-        setLoading(true);
         try {
             const response = await djangoApi.get('/api/v1/bot/status');
             setBotStatus(response.data);
             setError(null);
         } catch (err) {
             setError(err);
-        } finally {
-            setLoading(false);
+            console.error('Failed to fetch bot status:', err);
         }
     }, []);
 
-    const startBot = useCallback(async () => {
-        setLoading(true);
-        try {
-            const response = await djangoApi.post('/api/v1/bot/start');
-            setBotStatus(response.data);
-            setError(null);
-            return response.data;
-        } catch (err) {
-            setError(err);
-            throw err;
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    const stopBot = useCallback(async () => {
-        setLoading(true);
-        try {
-            const response = await djangoApi.post('/api/v1/bot/stop');
-            setBotStatus(response.data);
-            setError(null);
-            return response.data;
-        } catch (err) {
-            setError(err);
-            throw err;
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    const getSettings = useCallback(async () => {
-        try {
-            const response = await djangoApi.get('/api/v1/bot/settings');
-            return response.data;
-        } catch (err) {
-            setError(err);
-            throw err;
-        }
-    }, []);
-
-    const updateSettings = useCallback(async (settings) => {
-        try {
-            const response = await djangoApi.put('/api/v1/bot/settings', settings);
-            return response.data;
-        } catch (err) {
-            setError(err);
-            throw err;
-        }
-    }, []);
-
-    // Fetch status on mount
     useEffect(() => {
         fetchStatus();
     }, [fetchStatus]);
 
-    return {
-        botStatus,
-        loading,
-        error,
-        startBot,
-        stopBot,
-        fetchStatus,
-        getSettings,
-        updateSettings,
-    };
+    const startBot = useCallback(async () => {
+        setLoading(true);
+        try {
+            await djangoApi.post('/api/v1/bot/start');
+            await fetchStatus();
+        } catch (err) {
+            setError(err);
+        } finally {
+            setLoading(false);
+        }
+    }, [fetchStatus]);
+
+    const stopBot = useCallback(async () => {
+        setLoading(true);
+        try {
+            await djangoApi.post('/api/v1/bot/stop');
+            await fetchStatus();
+        } catch (err) {
+            setError(err);
+        } finally {
+            setLoading(false);
+        }
+    }, [fetchStatus]);
+
+    return { botStatus, loading, startBot, stopBot, error };
 }
 
-// Hook for creating/updating records
 export function useDjangoMutations(endpoint) {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
@@ -212,7 +142,7 @@ export function useDjangoMutations(endpoint) {
         setLoading(true);
         setError(null);
         try {
-            const response = await djangoApi.delete(`${endpoint}${id}/`);
+            await djangoApi.delete(`${endpoint}${id}/`);
             return true;
         } catch (err) {
             console.error('Delete error:', err.response?.data || err.message);
@@ -231,3 +161,5 @@ export function useDjangoMutations(endpoint) {
         remove,
     };
 }
+
+export { djangoApi };
