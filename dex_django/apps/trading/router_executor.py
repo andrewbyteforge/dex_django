@@ -107,6 +107,122 @@ class RouterExecutor:
                 supports_eth=False
             )
         }
+
+    async def _initialize_web3_connections(self):
+        """Initialize Web3 connections for each chain."""
+        
+        rpc_endpoints = {
+            "ethereum": os.getenv("ETH_RPC_URL", "https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY"),
+            "bsc": os.getenv("BSC_RPC_URL", "https://bsc-dataseed1.binance.org/"),
+            "base": os.getenv("BASE_RPC_URL", "https://mainnet.base.org/"),
+            "polygon": os.getenv("POLYGON_RPC_URL", "https://polygon-mainnet.g.alchemy.com/v2/YOUR_KEY")
+        }
+        
+        for chain, rpc_url in rpc_endpoints.items():
+            try:
+                web3 = Web3(Web3.HTTPProvider(rpc_url))
+                if web3.is_connected():
+                    self.web3_connections[chain] = web3
+                    logger.info(f"Connected to {chain}")
+                else:
+                    logger.error(f"Failed to connect to {chain}")
+            except Exception as e:
+                logger.error(f"Connection error for {chain}: {e}")
+
+    async def _validate_router_contract(self, router_config: RouterConfig) -> bool:
+        """
+        Validate router contract exists and has expected interface.
+        Handles both V2 and V3 router types correctly.
+        """
+        try:
+            web3 = self.web3_connections.get(router_config.chain)
+            if not web3:
+                logger.error(f"No Web3 connection for {router_config.chain}")
+                return False
+            
+            router_address = web3.to_checksum_address(router_config.router_address)
+            
+            # Check if contract exists at address
+            code = web3.eth.get_code(router_address)
+            if code == b'':
+                logger.error(f"No contract at {router_address} on {router_config.chain}")
+                return False
+            
+            # Different validation strategies for V2 vs V3
+            if "v3" in router_config.name.lower():
+                return await self._validate_v3_router(web3, router_address, router_config)
+            else:
+                return await self._validate_v2_router(web3, router_address, router_config)
+                
+        except Exception as e:
+            logger.error(f"Router validation failed for {router_config.name}: {e}")
+            return False
+
+    async def _validate_v2_router(self, web3: Web3, router_address: str, config: RouterConfig) -> bool:
+        """Validate Uniswap V2 style router (has factory() function)."""
+        try:
+            # V2 routers have factory() function
+            router_contract = web3.eth.contract(
+                address=router_address,
+                abi=[{
+                    "constant": True,
+                    "inputs": [],
+                    "name": "factory",
+                    "outputs": [{"name": "", "type": "address"}],
+                    "type": "function"
+                }]
+            )
+            
+            factory_address = router_contract.functions.factory().call()
+            expected_factory = config.factory_address
+            
+            if factory_address.lower() == expected_factory.lower():
+                logger.info(f"✓ {config.name}: V2 router validated (factory: {factory_address})")
+                return True
+            else:
+                logger.warning(f"✗ {config.name}: Factory mismatch. Got {factory_address}, expected {expected_factory}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"V2 router validation failed for {config.name}: {e}")
+            return False
+
+    async def _validate_v3_router(self, web3: Web3, router_address: str, config: RouterConfig) -> bool:
+        """Validate Uniswap V3 style router (has WETH9() function)."""
+        try:
+            # V3 routers have WETH9() function instead of factory()
+            router_contract = web3.eth.contract(
+                address=router_address,
+                abi=[{
+                    "constant": True,
+                    "inputs": [],
+                    "name": "WETH9",
+                    "outputs": [{"name": "", "type": "address"}],
+                    "type": "function"
+                }]
+            )
+            
+            weth_address = router_contract.functions.WETH9().call()
+            
+            # V3 validation: check if WETH address is reasonable (not zero)
+            if weth_address != "0x0000000000000000000000000000000000000000":
+                logger.info(f"✓ {config.name}: V3 router validated (WETH9: {weth_address})")
+                return True
+            else:
+                logger.warning(f"✗ {config.name}: Invalid WETH9 address")
+                return False
+                
+        except Exception as e:
+            logger.error(f"V3 router validation failed for {config.name}: {e}")
+            return False
+    
+    async def _load_private_key(self):
+        """Load encrypted private key."""
+        # TODO: Implement secure key loading
+        # For now, load from environment (NOT SECURE FOR PRODUCTION)
+        self.private_key = os.getenv("PRIVATE_KEY")
+        if not self.private_key:
+            logger.warning("PRIVATE_KEY not found in environment - live trading will fail")
     
     async def execute_swap(
         self,
@@ -302,35 +418,6 @@ class RouterExecutor:
         except Exception as e:
             logger.warning(f"Failed to get gas price, using default: {e}")
             return 50_000_000_000  # 50 gwei fallback
-    
-    async def _initialize_web3_connections(self):
-        """Initialize Web3 connections for each chain."""
-        
-        rpc_endpoints = {
-            "ethereum": os.getenv("ETH_RPC_URL", "https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY"),
-            "bsc": os.getenv("BSC_RPC_URL", "https://bsc-dataseed1.binance.org/"),
-            "base": os.getenv("BASE_RPC_URL", "https://mainnet.base.org/"),
-            "polygon": os.getenv("POLYGON_RPC_URL", "https://polygon-mainnet.g.alchemy.com/v2/YOUR_KEY")
-        }
-        
-        for chain, rpc_url in rpc_endpoints.items():
-            try:
-                web3 = Web3(Web3.HTTPProvider(rpc_url))
-                if web3.is_connected():
-                    self.web3_connections[chain] = web3
-                    logger.info(f"Connected to {chain}")
-                else:
-                    logger.error(f"Failed to connect to {chain}")
-            except Exception as e:
-                logger.error(f"Connection error for {chain}: {e}")
-    
-    async def _load_private_key(self):
-        """Load encrypted private key."""
-        # TODO: Implement secure key loading
-        # For now, load from environment (NOT SECURE FOR PRODUCTION)
-        self.private_key = os.getenv("PRIVATE_KEY")
-        if not self.private_key:
-            logger.warning("PRIVATE_KEY not found in environment - live trading will fail")
 
 # Complete Router ABIs
 UNISWAP_V2_ROUTER_ABI = [
@@ -381,6 +468,13 @@ UNISWAP_V2_ROUTER_ABI = [
         "outputs": [{"internalType": "uint[]", "name": "amounts", "type": "uint256[]"}],
         "stateMutability": "view",
         "type": "function"
+    },
+    {
+        "constant": True,
+        "inputs": [],
+        "name": "factory",
+        "outputs": [{"name": "", "type": "address"}],
+        "type": "function"
     }
 ]
 
@@ -411,6 +505,13 @@ UNISWAP_V3_ROUTER_ABI = [
         "name": "exactInputSingle",
         "outputs": [{"internalType": "uint256", "name": "amountOut", "type": "uint256"}],
         "stateMutability": "payable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "WETH9",
+        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+        "stateMutability": "view",
         "type": "function"
     }
 ]
