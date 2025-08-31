@@ -11,11 +11,15 @@ from .views_api_v1 import (
     PairViewSet,
     TradeViewSet,
     LedgerEntryViewSet,
-    # ↓ add these four
     bot_settings,
     bot_status,
     bot_start,
     bot_stop,
+)
+from .views_paper import (
+    paper_toggle,
+    paper_metrics,
+    paper_thought_log_test,
 )
 
 router_v1 = DefaultRouter()
@@ -33,6 +37,10 @@ urlpatterns = [
     path("api/v1/bot/status", bot_status, name="bot-status"),
     path("api/v1/bot/start", bot_start, name="bot-start"),
     path("api/v1/bot/stop", bot_stop, name="bot-stop"),
+    # Paper Trading endpoints
+    path("api/v1/paper/toggle", paper_toggle, name="paper-toggle"),
+    path("api/v1/metrics/paper", paper_metrics, name="paper-metrics"),
+    path("api/v1/paper/thought-log/test", paper_thought_log_test, name="paper-thought-log-test"),
     path(
         "api/v1/",
         include(([path("ping", ping, name="ping")] + router_v1.urls, "api_v1"), namespace="api_v1"),

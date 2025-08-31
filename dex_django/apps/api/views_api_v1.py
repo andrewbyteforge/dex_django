@@ -1,16 +1,25 @@
+# APP: backend
+# FILE: dex_django/apps/api/views_api_v1.py
 from __future__ import annotations
 
-from rest_framework import viewsets, filters
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
+import csv
+from io import BytesIO
+from django.db.models.deletion import ProtectedError
+from django.http import HttpResponse
+from django.utils.timezone import now
 from django.conf import settings
+from rest_framework import viewsets, filters, status
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
 
-from apps.storage.models import Provider, Token, Pair, Trade
+from apps.storage.models import Provider, Token, Pair, Trade, LedgerEntry
 from .serializers import (
     ProviderSerializer,
     TokenSerializer,
     PairSerializer,
     TradeSerializer,
+    LedgerEntrySerializer,
 )
 
 
@@ -31,11 +40,68 @@ class ProviderViewSet(viewsets.ModelViewSet):
 
 
 class TokenViewSet(viewsets.ModelViewSet):
-    """CRUD for Token."""
+    """CRUD for Token with proper error handling."""
     queryset = Token.objects.all().order_by("id")
     serializer_class = TokenSerializer
     filter_backends = [filters.SearchFilter]
     search_fields = ["symbol", "name", "address", "chain"]
+
+    def create(self, request, *args, **kwargs):
+        """Create token with proper validation and debugging."""
+        try:
+            print(f"Token creation request data: {request.data}")
+            serializer = self.get_serializer(data=request.data)
+            if serializer.is_valid():
+                self.perform_create(serializer)
+                headers = self.get_success_headers(serializer.data)
+                print(f"Token created successfully: {serializer.data}")
+                return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+            else:
+                print(f"Token creation validation failed: {serializer.errors}")
+                return Response({
+                    "error": "Invalid token data",
+                    "details": serializer.errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            print(f"Token creation exception: {str(e)}")
+            return Response({
+                "error": f"Failed to create token: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def destroy(self, request, *args, **kwargs):
+        """Delete token with proper error handling for protected relationships."""
+        try:
+            instance = self.get_object()
+            print(f"Attempting to delete token: {instance.symbol} (ID: {instance.id})")
+            
+            # Check if token is used in any pairs
+            pair_count = instance.base_pairs.count() + instance.quote_pairs.count()
+            print(f"Token {instance.symbol} is used in {pair_count} pairs")
+            
+            if pair_count > 0:
+                error_msg = f"Cannot delete token '{instance.symbol}' because it is used in {pair_count} trading pair(s). Remove the pairs first."
+                print(f"Token deletion blocked: {error_msg}")
+                return Response({
+                    "error": error_msg
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Safe to delete
+            instance.delete()
+            print(f"Token {instance.symbol} deleted successfully")
+            return Response(status=status.HTTP_204_NO_CONTENT)
+            
+        except ProtectedError as e:
+            error_msg = f"Cannot delete token because it is referenced by other records: {str(e)}"
+            print(f"ProtectedError: {error_msg}")
+            return Response({
+                "error": error_msg
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            error_msg = f"Failed to delete token: {str(e)}"
+            print(f"Delete exception: {error_msg}")
+            return Response({
+                "error": error_msg
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class PairViewSet(viewsets.ModelViewSet):
@@ -54,17 +120,6 @@ class TradeViewSet(viewsets.ModelViewSet):
     search_fields = ["tx_hash", "dex", "chain", "status", "side"]
 
 
-from apps.storage.models import Provider, Token, Pair, Trade, LedgerEntry  # add LedgerEntry
-from .serializers import (  # add LedgerEntrySerializer
-    ProviderSerializer,
-    TokenSerializer,
-    PairSerializer,
-    TradeSerializer,
-    LedgerEntrySerializer,
-)
-
-from rest_framework import viewsets, filters  # keep existing import
-
 class LedgerEntryViewSet(viewsets.ReadOnlyModelViewSet):
     """Read-only list/retrieve for ledger events."""
     queryset = LedgerEntry.objects.all().order_by("-timestamp")
@@ -73,189 +128,77 @@ class LedgerEntryViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ["event_type", "tx_hash", "reason", "trace_id", "network", "dex"]
 
 
-# extend existing imports
-from apps.storage.models import Provider, Token, Pair, Trade, LedgerEntry
-from .serializers import (
-    ProviderSerializer,
-    TokenSerializer,
-    PairSerializer,
-    TradeSerializer,
-    LedgerEntrySerializer,  # add
-)
-
-
-
-import csv
-from django.http import HttpResponse
-from django.utils.timezone import now
-from apps.storage.models import LedgerEntry
-
-# ...
-
-def ledger_export_csv(request):
-    """
-    Export all LedgerEntry rows as CSV (UTC timestamps).
-    Route: /api/v1/ledger/export.csv
-    """
-    ts = now().strftime("%Y%m%d-%H%M%S")
-    filename = f"ledger-{ts}.csv"
-    response = HttpResponse(content_type="text/csv")
-    response["Content-Disposition"] = f'attachment; filename="{filename}"'
-
-    writer = csv.writer(response)
-    headers = [
-        "id",
-        "timestamp_utc",
-        "event_type",
-        "network",
-        "dex",
-        "pair_address",
-        "tx_hash",
-        "amount_in",
-        "amount_out",
-        "fee_native",
-        "pnl_native",
-        "status",
-        "reason",
-        "trace_id",
-        "notes",
-    ]
-    writer.writerow(headers)
-
-    qs = LedgerEntry.objects.all().order_by("id").iterator(chunk_size=1000)
-    for row in qs:
-        writer.writerow(
-            [
-                row.id,
-                row.timestamp.isoformat(),
-                row.event_type,
-                row.network,
-                row.dex,
-                row.pair_address,
-                row.tx_hash,
-                row.amount_in,
-                row.amount_out,
-                row.fee_native,
-                row.pnl_native,
-                row.status,
-                row.reason,
-                row.trace_id,
-                row.notes,
-            ]
-        )
-
-    return response
-
-
-
-from io import BytesIO
-from django.http import HttpResponse
-
-def ledger_export_xlsx(request):
-    """
-    Export all LedgerEntry rows as an .xlsx file.
-    Route: /api/v1/ledger/export.xlsx
-    """
-    # Lazy import so we don’t require openpyxl during startup
-    from openpyxl import Workbook
-    from django.utils.timezone import now
-    from apps.storage.models import LedgerEntry
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "ledger"
-
-    headers = [
-        "id",
-        "timestamp_utc",
-        "event_type",
-        "network",
-        "dex",
-        "pair_address",
-        "tx_hash",
-        "amount_in",
-        "amount_out",
-        "fee_native",
-        "pnl_native",
-        "status",
-        "reason",
-        "trace_id",
-        "notes",
-    ]
-    ws.append(headers)
-
-    for row in LedgerEntry.objects.all().order_by("id").iterator(chunk_size=1000):
-        ws.append(
-            [
-                row.id,
-                row.timestamp.isoformat(),
-                row.event_type,
-                row.network,
-                row.dex,
-                row.pair_address,
-                row.tx_hash,
-                str(row.amount_in),
-                str(row.amount_out),
-                str(row.fee_native),
-                str(row.pnl_native),
-                row.status,
-                row.reason,
-                row.trace_id,
-                row.notes,
-            ]
-        )
-
-    buf = BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-
-    ts = now().strftime("%Y%m%d-%H%M%S")
-    resp = HttpResponse(
-        buf.getvalue(),
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-    resp["Content-Disposition"] = f'attachment; filename="ledger-{ts}.xlsx"'
-    return resp
-
-
-
-# at top with other imports
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
-from rest_framework import status as drf_status
-
-from apps.strategy.models import BotSettings
-from .serializers import BotSettingsSerializer
-from apps.strategy.runner import runner
-
-@api_view(["GET", "PUT"])
-@permission_classes([AllowAny])
-def bot_settings(request):
-    obj = BotSettings.objects.first() or BotSettings.objects.create()
-    if request.method == "GET":
-        return Response(BotSettingsSerializer(obj).data)
-    # PUT
-    ser = BotSettingsSerializer(obj, data=request.data, partial=True)
-    ser.is_valid(raise_exception=True)
-    ser.save()
-    return Response(ser.data)
-
+# Bot control endpoints
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def bot_status(request):
-    return Response({"ok": True, "status": runner.status()})
+    """Get bot status - mock implementation."""
+    return Response({
+        "ok": True, 
+        "status": "stopped",
+        "uptime": 0,
+        "last_trade": None
+    })
+
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def bot_start(request):
-    started = runner.start()
-    return Response({"ok": True, "started": started, "status": runner.status()},
-                    status=drf_status.HTTP_200_OK)
+    """Start bot - mock implementation."""
+    return Response({
+        "ok": True, 
+        "started": True, 
+        "status": "running"
+    })
+
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def bot_stop(request):
-    stopped = runner.stop()
-    return Response({"ok": True, "stopped": stopped, "status": runner.status()},
-                    status=drf_status.HTTP_200_OK)
+    """Stop bot - mock implementation."""
+    return Response({
+        "ok": True, 
+        "stopped": True, 
+        "status": "stopped"
+    })
+
+
+@api_view(["GET", "PUT"])
+@permission_classes([AllowAny])
+def bot_settings(request):
+    """Get/update bot settings - mock implementation."""
+    if request.method == "GET":
+        return Response({
+            "max_slippage_bps": 300,
+            "max_trade_size_eth": 1.0,
+            "gas_price_multiplier": 1.2,
+            "min_liquidity_usd": 10000.0,
+        })
+    else:
+        # PUT - just return the data back for now
+        return Response(request.data)
+
+
+# CSV Export
+def ledger_export_csv(request):
+    """Export all LedgerEntry rows as CSV (UTC timestamps)."""
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename="ledger-{now().strftime("%Y%m%d-%H%M%S")}.csv"'
+    
+    writer = csv.writer(response)
+    writer.writerow([
+        'id', 'timestamp_utc', 'event_type', 'network', 'dex', 
+        'pair_address', 'tx_hash', 'amount_in', 'amount_out', 
+        'fee_native', 'pnl_native', 'status', 'reason', 'trace_id', 'notes'
+    ])
+    
+    for entry in LedgerEntry.objects.all().order_by('id'):
+        writer.writerow([
+            entry.id, entry.timestamp.isoformat(), entry.event_type,
+            entry.network, entry.dex, entry.pair_address, entry.tx_hash,
+            str(entry.amount_in), str(entry.amount_out), str(entry.fee_native),
+            str(entry.pnl_native), entry.status, entry.reason, 
+            entry.trace_id, entry.notes
+        ])
+    
+    return response

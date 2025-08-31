@@ -60,9 +60,12 @@ INSTALLED_APPS = [
     "corsheaders", 
 ]
 
-# Channels: in-memory layer for dev (we’ll switch to Redis later)
+ASGI_APPLICATION = 'dex_django.asgi.application'
+
 CHANNEL_LAYERS = {
-    "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer"
+    }
 }
 
 # DRF minimal baseline
