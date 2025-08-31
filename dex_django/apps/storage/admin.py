@@ -1,64 +1,18 @@
 from __future__ import annotations
 
 from django.contrib import admin
-from .models import Provider, Token, Pair, Trade, LedgerEntry
-
-
-@admin.register(Provider)
-class ProviderAdmin(admin.ModelAdmin):
-    list_display = ("name", "kind", "mode", "enabled", "updated_at")
-    list_filter = ("kind", "mode", "enabled")
-
-
-@admin.register(Token)
-class TokenAdmin(admin.ModelAdmin):
-    list_display = ("symbol", "chain", "address", "decimals", "fee_on_transfer")
-    search_fields = ("symbol", "address", "name")
-    list_filter = ("chain", "fee_on_transfer")
-
-
-@admin.register(Pair)
-class PairAdmin(admin.ModelAdmin):
-    list_display = ("chain", "dex", "address", "base_token", "quote_token", "fee_bps")
-    search_fields = ("address",)
-    list_filter = ("chain", "dex")
-
-
-@admin.register(Trade)
-class TradeAdmin(admin.ModelAdmin):
-    list_display = ("created_at", "chain", "dex", "pair", "side", "mode", "status")
-    list_filter = ("chain", "dex", "side", "mode", "status")
-    date_hierarchy = "created_at"
-
-
-@admin.register(LedgerEntry)
-class LedgerEntryAdmin(admin.ModelAdmin):
-    list_display = ("timestamp", "event_type", "status", "tx_hash", "trace_id")
-    list_filter = ("event_type", "status")
-    search_fields = ("tx_hash", "trace_id", "notes")
-    date_hierarchy = "timestamp"
-
-
-from __future__ import annotations
-
-from django.contrib import admin
-from django.db.models import Count, Avg
 from django.utils.html import format_html
-from django.urls import reverse
-from django.utils.safestring import mark_safe
-
 from .models import (
     Provider, Token, Pair, Trade, LedgerEntry,
     FollowedTrader, CopyTrade, CopyTradeFilter
 )
 
 
-# Existing admin registrations (keep as-is)
 @admin.register(Provider)
 class ProviderAdmin(admin.ModelAdmin):
     """Admin interface for Provider model."""
-    list_display = ('name', 'kind', 'enabled', 'mode', 'created_at')
-    list_filter = ('kind', 'enabled', 'mode')
+    list_display = ("name", "kind", "mode", "enabled", "updated_at")
+    list_filter = ("kind", "mode", "enabled")
     search_fields = ('name', 'url')
     ordering = ('-created_at',)
 
@@ -66,26 +20,27 @@ class ProviderAdmin(admin.ModelAdmin):
 @admin.register(Token)
 class TokenAdmin(admin.ModelAdmin):
     """Admin interface for Token model."""
-    list_display = ('symbol', 'name', 'chain', 'address', 'decimals', 'fee_on_transfer')
-    list_filter = ('chain', 'fee_on_transfer')
-    search_fields = ('symbol', 'name', 'address')
+    list_display = ("symbol", "chain", "address", "decimals", "fee_on_transfer")
+    search_fields = ("symbol", "address", "name")
+    list_filter = ("chain", "fee_on_transfer")
     ordering = ('chain', 'symbol')
 
 
 @admin.register(Pair)
 class PairAdmin(admin.ModelAdmin):
     """Admin interface for Pair model."""
-    list_display = ('dex', 'chain', 'base_token', 'quote_token', 'fee_bps', 'discovered_at')
-    list_filter = ('chain', 'dex')
-    search_fields = ('address', 'base_token__symbol', 'quote_token__symbol')
+    list_display = ("chain", "dex", "address", "base_token", "quote_token", "fee_bps")
+    search_fields = ("address",)
+    list_filter = ("chain", "dex")
     ordering = ('-discovered_at',)
 
 
 @admin.register(Trade)
 class TradeAdmin(admin.ModelAdmin):
     """Admin interface for Trade model."""
-    list_display = ('pair', 'side', 'mode', 'amount_in', 'amount_out', 'status', 'created_at')
-    list_filter = ('side', 'mode', 'status', 'chain', 'dex')
+    list_display = ("created_at", "chain", "dex", "pair", "side", "mode", "status")
+    list_filter = ("chain", "dex", "side", "mode", "status")
+    date_hierarchy = "created_at"
     search_fields = ('tx_hash', 'pair__base_token__symbol')
     ordering = ('-created_at',)
 
@@ -93,11 +48,12 @@ class TradeAdmin(admin.ModelAdmin):
 @admin.register(LedgerEntry)
 class LedgerEntryAdmin(admin.ModelAdmin):
     """Admin interface for LedgerEntry model."""
-    list_display = ('timestamp', 'event_type', 'network', 'dex', 'status', 'tx_hash_short')
-    list_filter = ('event_type', 'status', 'network', 'dex')
-    search_fields = ('tx_hash', 'trace_id', 'notes')
-    ordering = ('-timestamp',)
+    list_display = ("timestamp", "event_type", "status", "tx_hash_short", "trace_id")
+    list_filter = ("event_type", "status")
+    search_fields = ("tx_hash", "trace_id", "notes")
+    date_hierarchy = "timestamp"
     readonly_fields = ('timestamp',)
+    ordering = ('-timestamp',)
     
     def tx_hash_short(self, obj):
         """Display shortened tx hash."""
@@ -107,7 +63,7 @@ class LedgerEntryAdmin(admin.ModelAdmin):
     tx_hash_short.short_description = "Tx Hash"
 
 
-# NEW: Copy Trading Admin Classes
+# COPY TRADING ADMIN CLASSES
 @admin.register(FollowedTrader)
 class FollowedTraderAdmin(admin.ModelAdmin):
     """Admin interface for FollowedTrader model."""
