@@ -53,10 +53,10 @@ class RouterExecutor:
             return False
     
     async def _load_router_configs(self):
-        """Load DEX router configurations."""
+        """Load DEX router configurations for all chains."""
         self.router_configs = {
-            # Uniswap V2 (Ethereum)
-            "uniswap_v2_eth": RouterConfig(
+            # Ethereum - Uniswap V2
+            "uniswap_v2_ethereum": RouterConfig(
                 name="Uniswap V2",
                 chain="ethereum", 
                 router_address="0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
@@ -65,8 +65,8 @@ class RouterExecutor:
                 supports_eth=True
             ),
             
-            # Uniswap V3 (Ethereum) 
-            "uniswap_v3_eth": RouterConfig(
+            # Ethereum - Uniswap V3
+            "uniswap_v3_ethereum": RouterConfig(
                 name="Uniswap V3",
                 chain="ethereum",
                 router_address="0xE592427A0AEce92De3Edee1F18E0157C05861564", 
@@ -76,7 +76,7 @@ class RouterExecutor:
                 fee_tiers=[500, 3000, 10000]
             ),
             
-            # PancakeSwap V2 (BSC)
+            # BSC - PancakeSwap V2
             "pancake_v2_bsc": RouterConfig(
                 name="PancakeSwap V2", 
                 chain="bsc",
@@ -86,7 +86,26 @@ class RouterExecutor:
                 supports_eth=False
             ),
             
-            # Add more routers: Base, Polygon, etc.
+            # Base - Uniswap V3
+            "uniswap_v3_base": RouterConfig(
+                name="Uniswap V3 Base",
+                chain="base",
+                router_address="0x2626664c2603336E57B271c5C0b26F421741e481",
+                factory_address="0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
+                router_abi=UNISWAP_V3_ROUTER_ABI,
+                supports_eth=True,
+                fee_tiers=[500, 3000, 10000]
+            ),
+            
+            # Polygon - QuickSwap
+            "quickswap_polygon": RouterConfig(
+                name="QuickSwap",
+                chain="polygon",
+                router_address="0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff",
+                factory_address="0x5757371414417b8C6CAad45bAeF941aBc7d3Ab32",
+                router_abi=QUICKSWAP_ROUTER_ABI,
+                supports_eth=False
+            )
         }
     
     async def execute_swap(
@@ -108,6 +127,10 @@ class RouterExecutor:
             return {"success": False, "error": f"Unsupported router: {router_key}"}
         
         config = self.router_configs[router_key]
+        
+        if chain not in self.web3_connections:
+            return {"success": False, "error": f"No Web3 connection for chain: {chain}"}
+            
         web3 = self.web3_connections[chain]
         
         try:
@@ -135,8 +158,8 @@ class RouterExecutor:
         except Exception as e:
             logger.error(f"Swap execution failed: {e}")
             return {"success": False, "error": str(e)}
-        
-async def _calculate_min_output(
+    
+    async def _calculate_min_output(
         self,
         router: Contract,
         token_in: str,
@@ -307,9 +330,9 @@ async def _calculate_min_output(
         # For now, load from environment (NOT SECURE FOR PRODUCTION)
         self.private_key = os.getenv("PRIVATE_KEY")
         if not self.private_key:
-            raise ValueError("PRIVATE_KEY not found in environment")
+            logger.warning("PRIVATE_KEY not found in environment - live trading will fail")
 
-# Router ABI constants (abbreviated - full ABIs would be longer)
+# Complete Router ABIs
 UNISWAP_V2_ROUTER_ABI = [
     {
         "inputs": [
@@ -323,12 +346,73 @@ UNISWAP_V2_ROUTER_ABI = [
         "stateMutability": "payable",
         "type": "function"
     },
-    # Add more ABI entries for other swap functions...
+    {
+        "inputs": [
+            {"internalType": "uint", "name": "amountIn", "type": "uint256"},
+            {"internalType": "uint", "name": "amountOutMin", "type": "uint256"},
+            {"internalType": "address[]", "name": "path", "type": "address[]"},
+            {"internalType": "address", "name": "to", "type": "address"},
+            {"internalType": "uint", "name": "deadline", "type": "uint256"}
+        ],
+        "name": "swapExactTokensForETH",
+        "outputs": [{"internalType": "uint[]", "name": "amounts", "type": "uint256[]"}],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {"internalType": "uint", "name": "amountIn", "type": "uint256"},
+            {"internalType": "uint", "name": "amountOutMin", "type": "uint256"},
+            {"internalType": "address[]", "name": "path", "type": "address[]"},
+            {"internalType": "address", "name": "to", "type": "address"},
+            {"internalType": "uint", "name": "deadline", "type": "uint256"}
+        ],
+        "name": "swapExactTokensForTokens",
+        "outputs": [{"internalType": "uint[]", "name": "amounts", "type": "uint256[]"}],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {"internalType": "uint", "name": "amountIn", "type": "uint256"},
+            {"internalType": "address[]", "name": "path", "type": "address[]"}
+        ],
+        "name": "getAmountsOut",
+        "outputs": [{"internalType": "uint[]", "name": "amounts", "type": "uint256[]"}],
+        "stateMutability": "view",
+        "type": "function"
+    }
 ]
 
-PANCAKE_V2_ROUTER_ABI = UNISWAP_V2_ROUTER_ABI  # Same interface
+# PancakeSwap uses same interface as Uniswap V2
+PANCAKE_V2_ROUTER_ABI = UNISWAP_V2_ROUTER_ABI
+QUICKSWAP_ROUTER_ABI = UNISWAP_V2_ROUTER_ABI
+
+# Uniswap V3 has different interface - simplified version
 UNISWAP_V3_ROUTER_ABI = [
-    # V3 has different ABI structure - would need exact swap functions
+    {
+        "inputs": [
+            {
+                "components": [
+                    {"internalType": "address", "name": "tokenIn", "type": "address"},
+                    {"internalType": "address", "name": "tokenOut", "type": "address"},
+                    {"internalType": "uint24", "name": "fee", "type": "uint24"},
+                    {"internalType": "address", "name": "recipient", "type": "address"},
+                    {"internalType": "uint256", "name": "deadline", "type": "uint256"},
+                    {"internalType": "uint256", "name": "amountIn", "type": "uint256"},
+                    {"internalType": "uint256", "name": "amountOutMinimum", "type": "uint256"},
+                    {"internalType": "uint160", "name": "sqrtPriceLimitX96", "type": "uint160"}
+                ],
+                "internalType": "struct ISwapRouter.ExactInputSingleParams",
+                "name": "params",
+                "type": "tuple"
+            }
+        ],
+        "name": "exactInputSingle",
+        "outputs": [{"internalType": "uint256", "name": "amountOut", "type": "uint256"}],
+        "stateMutability": "payable",
+        "type": "function"
+    }
 ]
 
 # Global instance
