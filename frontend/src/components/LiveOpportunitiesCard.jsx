@@ -504,11 +504,11 @@ export function LiveOpportunitiesCard() {
                                     {opportunities.map((opp, index) => (
                                         <tr key={`${opp.pair_address}-${index}`}>
                                             <td>
-                                                <strong>{opp.token0_symbol || 'TOKEN'}</strong>
+                                                <strong>{opp.base_symbol || 'TOKEN'}</strong>
                                                 <span className="text-muted">/</span>
-                                                <span>{opp.token1_symbol || 'WETH'}</span>
+                                                <span>{opp.quote_symbol || 'WETH'}</span>
                                                 <div className="small text-muted font-monospace">
-                                                    {opp.pair_address?.slice(0, 8)}...
+                                                    {opp.address?.slice(0, 8)}...
                                                 </div>
                                             </td>
                                             <td>
@@ -519,11 +519,11 @@ export function LiveOpportunitiesCard() {
                                             </td>
                                             <td>
                                                 <span className={
-                                                    (opp.estimated_liquidity_usd || 0) >= 100000 ? 'text-success fw-bold' :
-                                                        (opp.estimated_liquidity_usd || 0) >= 50000 ? 'text-warning' :
+                                                    (opp.liquidity_usd || 0) >= 100000 ? 'text-success fw-bold' :
+                                                        (opp.liquidity_usd || 0) >= 50000 ? 'text-warning' :
                                                             'text-danger'
                                                 }>
-                                                    ${(opp.estimated_liquidity_usd || 0).toLocaleString()}
+                                                    ${(opp.liquidity_usd || 0).toLocaleString()}
                                                 </span>
                                             </td>
                                             <td>
@@ -537,15 +537,15 @@ export function LiveOpportunitiesCard() {
                                             </td>
                                             <td>
                                                 <Badge bg={
-                                                    (opp.opportunity_score || 0) >= 8 ? 'success' :
-                                                        (opp.opportunity_score || 0) >= 6 ? 'warning' : 'secondary'
+                                                    (opp.score || 0) >= 8 ? 'success' :
+                                                        (opp.score || 0) >= 6 ? 'warning' : 'secondary'
                                                 }>
-                                                    {opp.opportunity_score ? opp.opportunity_score.toFixed(1) : 'N/A'}
+                                                    {opp.score ? opp.score.toFixed(1) : 'N/A'}
                                                 </Badge>
                                             </td>
                                             <td>
                                                 <small className="text-muted">
-                                                    {formatTimeAgo(opp.timestamp)}
+                                                    {formatTimeAgo(opp.created_at)}
                                                 </small>
                                             </td>
                                             <td>
