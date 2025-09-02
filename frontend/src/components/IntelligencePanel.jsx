@@ -24,7 +24,7 @@ export function IntelligencePanel({ opportunities = [], userBalance = 1000 }) {
     const loadIntelligenceStatus = async () => {
         try {
             const response = await axios.get(`${API_BASE}/api/v1/intelligence/status`);
-            setIntelligenceStatus(response.data.intelligence);
+            setIntelligenceStatus(response.data);
         } catch (err) {
             console.error('Failed to load intelligence status:', err);
         }
