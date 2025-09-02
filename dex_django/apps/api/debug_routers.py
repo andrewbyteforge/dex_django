@@ -250,61 +250,45 @@ async def execute_mock_trade(request: MockTradeRequest) -> Dict[str, Any]:
 # Discovery and Opportunities Mock Endpoints
 @api_router.get("/opportunities/live")
 async def get_live_opportunities(
-    limit: int = Query(default=20, ge=1, le=100),
-    chain: Optional[str] = Query(default=None),
-    min_score: float = Query(default=0.0, ge=0.0, le=10.0)
-) -> Dict[str, Any]:
-    """
-    Get mock live trading opportunities.
-    
-    Args:
-        limit: Maximum number of opportunities to return.
-        chain: Optional chain filter.
-        min_score: Minimum opportunity score filter.
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(100, ge=1, le=200, description="Results per page")  # Increased limit
+):
+    """Get REAL live opportunities from DEX APIs."""
+    try:
+        logger.info(f"Fetching live opportunities (page {page}, limit {limit})...")
         
-    Returns:
-        List of mock trading opportunities.
-    """
-    logger.info(f"Opportunities request: limit={limit}, chain={chain}, min_score={min_score}")
-    
-    chains = ["ethereum", "bsc", "base", "polygon", "solana"]
-    dexes = ["uniswap_v3", "pancakeswap", "quickswap", "jupiter", "1inch"]
-    symbols = ["PEPE/WETH", "DOGE/USDC", "SHIB/USDT", "WIF/SOL", "BONK/USDC"]
-    
-    opportunities = []
-    
-    for i in range(limit):
-        selected_chain = chain if chain else random.choice(chains)
-        score = random.uniform(min_score, 10.0)
+        # Fetch real opportunities
+        all_opportunities = await fetch_real_opportunities()
         
-        opportunity = MockOpportunity(
-            id=f"opp_{random.randint(100000, 999999)}",
-            symbol=random.choice(symbols),
-            chain=selected_chain,
-            dex=random.choice(dexes),
-            price_usd=Decimal(str(random.uniform(0.0001, 5.0))),
-            liquidity_usd=Decimal(str(random.uniform(10000, 500000))),
-            volume_24h_usd=Decimal(str(random.uniform(50000, 2000000))),
-            score=score,
-            risk_level="low" if score > 7 else "medium" if score > 4 else "high",
-            timestamp=datetime.now(timezone.utc).isoformat()
-        )
-        opportunities.append(opportunity.dict())
+        # Apply pagination
+        total_count = len(all_opportunities)
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        paginated_opportunities = all_opportunities[start_idx:end_idx]
+        
+        logger.info(f"Returning {len(paginated_opportunities)} real opportunities (total: {total_count})")
+        
+        return {
+            "status": "ok",
+            "opportunities": paginated_opportunities,
+            "count": len(paginated_opportunities),
+            "total": total_count,
+            "page": page,
+            "pages": (total_count + limit - 1) // limit,
+            "limit": limit,
+            "last_updated": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Live opportunities error: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "opportunities": [],
+            "count": 0
+        }
     
-    result = {
-        "status": "success",
-        "opportunities": opportunities,
-        "total_count": len(opportunities),
-        "filters_applied": {
-            "chain": chain,
-            "min_score": min_score,
-            "limit": limit
-        },
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
-    
-    logger.info(f"Returning {len(opportunities)} opportunities")
-    return result
+
 
 
 @api_router.get("/opportunities/stats")

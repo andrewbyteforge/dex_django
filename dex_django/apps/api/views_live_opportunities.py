@@ -133,12 +133,12 @@ def _fetch_live_opportunities_sync(trace_id: str = "unknown") -> List[Dict[str, 
                     if opportunity:
                         opportunities.append(opportunity)
                         
-            logger.info(f"[{trace_id}] DexScreener added {len([o for o in opportunities if o.get('source') == 'dexscreener'])} opportunities")
+            logger.info(f"[{trace_id}] DexScreener trending added {len([o for o in opportunities if o.get('source') == 'dexscreener'])} opportunities")
         else:
             logger.error(f"[{trace_id}] DexScreener API error: {response.status_code}")
     
     except Exception as e:
-        logger.error(f"[{trace_id}] DexScreener failed: {e}")
+        logger.error(f"[{trace_id}] DexScreener trending failed: {e}")
     
     # Method 2: DexScreener new pairs (REAL DATA)
     try:
@@ -155,12 +155,17 @@ def _fetch_live_opportunities_sync(trace_id: str = "unknown") -> List[Dict[str, 
             # Filter for recently created pairs with decent liquidity
             recent_pairs = []
             for pair in pairs:
-                liquidity_usd = float(pair.get("liquidity", {}).get("usd", 0))
+                liquidity_data = pair.get("liquidity", {})
+                if isinstance(liquidity_data, dict):
+                    liquidity_usd = float(liquidity_data.get("usd", 0))
+                else:
+                    liquidity_usd = float(liquidity_data) if liquidity_data else 0
+                    
                 if liquidity_usd >= 10000:  # Minimum liquidity filter
                     recent_pairs.append(pair)
             
             # Sort by liquidity and take top 10
-            recent_pairs.sort(key=lambda x: float(x.get("liquidity", {}).get("usd", 0)), reverse=True)
+            recent_pairs.sort(key=lambda x: float(x.get("liquidity", {}).get("usd", 0)) if isinstance(x.get("liquidity"), dict) else float(x.get("liquidity", 0)), reverse=True)
             
             for pair in recent_pairs[:10]:
                 opportunity = _process_dexscreener_pair(pair, trace_id)
@@ -284,8 +289,111 @@ def _fetch_live_opportunities_sync(trace_id: str = "unknown") -> List[Dict[str, 
             seen_pairs.add(pair_key)
             unique_opportunities.append(opp)
     
-    logger.info(f"[{trace_id}] Returning {len(unique_opportunities)} unique opportunities from real APIs")
-    return unique_opportunities[:25]  # Return top 25 real opportunities
+    # Standardize format for frontend compatibility
+    formatted_opportunities = []
+    for opp in unique_opportunities:
+        formatted_opp = _standardize_opportunity_format(opp, trace_id)
+        formatted_opportunities.append(formatted_opp)
+    
+    logger.info(f"[{trace_id}] Returning {len(formatted_opportunities)} formatted opportunities from real APIs")
+    return formatted_opportunities[:25]  # Return top 25 real opportunities
+
+
+def _standardize_opportunity_format(opportunity: Dict[str, Any], trace_id: str = "unknown") -> Dict[str, Any]:
+    """Standardize opportunity format for frontend compatibility."""
+    try:
+        # Extract symbols from either field format
+        symbols = opportunity.get("symbol", "")
+        if "/" in symbols:
+            token0_symbol, token1_symbol = symbols.split("/", 1)
+        else:
+            token0_symbol = opportunity.get("token0_symbol", "TOKEN0")
+            token1_symbol = opportunity.get("token1_symbol", "TOKEN1")
+        
+        return {
+            # Core identification
+            "id": opportunity.get("id", f"opp_{hash(opportunity.get('pair_address', '')) % 1000000}"),
+            "pair_address": opportunity.get("pair_address", ""),
+            "address": opportunity.get("pair_address", ""),  # Alias for frontend compatibility
+            
+            # Token information
+            "symbol": f"{token0_symbol}/{token1_symbol}",
+            "token0_symbol": token0_symbol,
+            "token1_symbol": token1_symbol,
+            "base_symbol": token0_symbol,  # Alias
+            "quote_symbol": token1_symbol,  # Alias
+            
+            # Chain and DEX
+            "chain": opportunity.get("chain", "unknown"),
+            "dex": opportunity.get("dex", "unknown"),
+            "source": opportunity.get("source", opportunity.get("dex", "unknown")),
+            
+            # Financial metrics (use consistent field names)
+            "liquidity_usd": float(opportunity.get("estimated_liquidity_usd", 0)),
+            "estimated_liquidity_usd": float(opportunity.get("estimated_liquidity_usd", 0)),  # Alias
+            "price_usd": float(opportunity.get("price_usd", 0)),
+            "volume_24h": float(opportunity.get("volume_24h", 0)),
+            "volume_24h_usd": float(opportunity.get("volume_24h", 0)),  # Alias
+            "price_change_24h": float(opportunity.get("price_change_24h", 0)),
+            
+            # Scoring and risk
+            "score": float(opportunity.get("opportunity_score", 0)),
+            "opportunity_score": float(opportunity.get("opportunity_score", 0)),  # Alias
+            "risk_level": _determine_risk_level(opportunity),
+            "risk_flags": opportunity.get("risk_flags", []),
+            
+            # Timestamps
+            "timestamp": opportunity.get("timestamp", datetime.now().isoformat()),
+            "created_at": opportunity.get("timestamp", datetime.now().isoformat()),  # Alias
+            "time_ago": "Live",
+            
+            # Additional metadata
+            "block_number": opportunity.get("block_number", 0),
+            "initial_reserve0": opportunity.get("initial_reserve0", 0),
+            "initial_reserve1": opportunity.get("initial_reserve1", 0),
+        }
+    except Exception as e:
+        logger.error(f"[{trace_id}] Error standardizing opportunity format: {e}")
+        return opportunity  # Return original if formatting fails
+
+
+def _determine_risk_level(opportunity: Dict[str, Any]) -> str:
+    """Determine risk level based on opportunity characteristics."""
+    try:
+        liquidity = float(opportunity.get("estimated_liquidity_usd", 0))
+        score = float(opportunity.get("opportunity_score", 0))
+        source = opportunity.get("source", "unknown")
+        
+        # High risk factors
+        risk_score = 0
+        
+        if liquidity < 10000:
+            risk_score += 3
+        elif liquidity < 50000:
+            risk_score += 2
+        elif liquidity < 100000:
+            risk_score += 1
+            
+        if score < 3:
+            risk_score += 2
+        elif score < 7:
+            risk_score += 1
+            
+        if source in ["fallback", "mock"]:
+            risk_score += 3
+        elif source not in ["dexscreener", "uniswap_v3", "jupiter"]:
+            risk_score += 1
+        
+        # Determine final risk level
+        if risk_score >= 5:
+            return "high"
+        elif risk_score >= 3:
+            return "medium"
+        else:
+            return "low"
+            
+    except Exception:
+        return "medium"  # Default to medium risk if calculation fails
 
 
 def _process_dexscreener_pair(pair: Dict[str, Any], trace_id: str) -> Dict[str, Any] | None:
