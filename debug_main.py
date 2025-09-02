@@ -27,7 +27,7 @@ import uuid
 from fastapi import APIRouter
 
 # System path setup - Add to path BEFORE importing app modules
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Configure logging
 logging.basicConfig(
@@ -389,30 +389,85 @@ def calculate_opportunity_score(opp: Dict[str, Any]) -> float:
 def ensure_django_setup():
     """Ensure Django is properly configured before database operations."""
     try:
+        import os
+        import sys
         import django
         from django.conf import settings
         
+        # Get the current working directory (should be D:\dex_django)
+        current_dir = os.getcwd()
+        logger.info(f"Current working directory: {current_dir}")
+        
+        # CRITICAL FIX: Add the current directory to Python path
+        # This allows Python to find the dex_django.dex_django.settings module
+        if current_dir not in sys.path:
+            sys.path.insert(0, current_dir)
+            logger.info(f"Added {current_dir} to sys.path")
+        
+        # Verify the settings file exists at the expected location
+        settings_file = os.path.join(current_dir, 'dex_django', 'dex_django', 'settings.py')
+        logger.info(f"Settings file exists at {settings_file}: {os.path.exists(settings_file)}")
+        
+        # Set the Django settings module - this should now work
+        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.dex_django.settings')
+        logger.info(f"Django settings module set to: {os.environ.get('DJANGO_SETTINGS_MODULE')}")
+        
+        # Show current Python path for debugging
+        logger.info(f"Current Python path (first 3): {sys.path[:3]}")
+        
+        # Configure Django if not already configured
         if not settings.configured:
-            # Set up Django settings
-            import os
-            
-            # Set the settings module environment variable
-            os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.settings')
-            
-            # Add the dex_django directory to Python path for imports
-            import sys
-            dex_django_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dex_django')
-            if dex_django_path not in sys.path:
-                sys.path.insert(0, dex_django_path)
-            
-            # Configure Django
             django.setup()
-            logger.info("Django configured successfully for endpoints")
+            logger.info("Django setup() completed successfully")
+        else:
+            logger.info("Django already configured")
             
+        # REMOVE THE ASYNC-PROBLEMATIC DATABASE TEST
+        # The following lines cause the async context error:
+        # from django.db import connection
+        # with connection.cursor() as cursor:
+        #     cursor.execute("SELECT 1")
+        #     result = cursor.fetchone()
+        #     logger.info(f"Database connection test result: {result}")
+        
+        # Instead, just verify that Django is configured
+        logger.info("Django configuration verified successfully")
         return True
+        
     except Exception as e:
         logger.error(f"Django setup failed: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        logger.error(f"Current Python path: {sys.path[:5]}")
+        logger.error(f"Current working directory: {os.getcwd()}")
+        logger.error(f"DJANGO_SETTINGS_MODULE: {os.environ.get('DJANGO_SETTINGS_MODULE', 'Not set')}")
+        
+        # Debug directory structure
+        try:
+            current_dir = os.getcwd()
+            logger.error(f"Root directory contents: {os.listdir(current_dir)}")
+            
+            dex_django_path = os.path.join(current_dir, 'dex_django')
+            if os.path.exists(dex_django_path):
+                logger.error(f"dex_django directory contents: {os.listdir(dex_django_path)}")
+                
+                inner_path = os.path.join(dex_django_path, 'dex_django')
+                if os.path.exists(inner_path):
+                    logger.error(f"Inner dex_django contents: {os.listdir(inner_path)}")
+                    
+                    # Check if settings.py actually exists
+                    settings_path = os.path.join(inner_path, 'settings.py')
+                    logger.error(f"settings.py exists: {os.path.exists(settings_path)}")
+                    
+        except Exception as debug_e:
+            logger.error(f"Error during debug info gathering: {debug_e}")
+            
         return False
+
+
+
+
+
 
 # Create a discovery router that can be imported by debug server factory
 discovery_router = APIRouter(prefix="/api/v1")
@@ -581,8 +636,12 @@ async def add_trader_endpoint(request_data: dict = None):
     This endpoint is called when users click "Add Trader" in the frontend.
     """
     try:
+        logger.info("=== ADD TRADER ENDPOINT CALLED ===")
+        logger.info(f"Request data: {request_data}")
+        
         # Ensure Django is configured
         if not ensure_django_setup():
+            logger.error("Django setup failed - returning error response")
             return {
                 "status": "error",
                 "success": False,
@@ -596,6 +655,7 @@ async def add_trader_endpoint(request_data: dict = None):
         trader_name = body.get('trader_name', '')
         
         if not trader_address:
+            logger.error("No trader address provided")
             return {
                 "status": "error",
                 "success": False,
@@ -604,17 +664,42 @@ async def add_trader_endpoint(request_data: dict = None):
             }
         
         if not trader_name:
+            logger.error("No trader name provided")
             return {
                 "status": "error", 
                 "success": False,
                 "error": "Trader name is required",
                 "message": "Trader name is required"
             }
+            
         logger.info(f"Adding trader: {trader_address} (name: {trader_name})")
         
         # Save to real Django database
         try:
-            from apps.storage.models import FollowedTrader
+            # Try multiple import paths for the FollowedTrader model
+            FollowedTrader = None
+            
+            # Try the correct Django apps path first
+            try:
+                from dex_django.apps.storage.models import FollowedTrader
+                logger.info("Successfully imported FollowedTrader from dex_django.apps.storage.models")
+            except ImportError:
+                try:
+                    from apps.storage.models import FollowedTrader
+                    logger.info("Successfully imported FollowedTrader from apps.storage.models")
+                except ImportError:
+                    try:
+                        from storage.models import FollowedTrader
+                        logger.info("Successfully imported FollowedTrader from storage.models")
+                    except ImportError:
+                        logger.error("Could not import FollowedTrader from any location")
+                        return {
+                            "status": "error",
+                            "success": False,
+                            "error": "Model import failed",
+                            "message": "Could not import FollowedTrader model"
+                        }
+            
             from decimal import Decimal
             
             # Validate copy mode logic
@@ -625,6 +710,8 @@ async def add_trader_endpoint(request_data: dict = None):
             if copy_buy_only and copy_sell_only:
                 copy_buy_only = False
                 copy_sell_only = False
+            
+            logger.info(f"Creating FollowedTrader with data: address={trader_address}, name={trader_name}")
             
             # Create new FollowedTrader in database
             trader = FollowedTrader.objects.create(
@@ -639,6 +726,8 @@ async def add_trader_endpoint(request_data: dict = None):
                 copy_sell_only=copy_sell_only,
                 status='active'
             )
+            
+            logger.info(f"Successfully created trader in database with ID: {trader.id}")
             
             # Return the actual saved data
             trader_data = {
@@ -676,6 +765,8 @@ async def add_trader_endpoint(request_data: dict = None):
             
         except Exception as db_error:
             logger.error(f"Database save failed: {db_error}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             return {
                 "status": "error",
                 "success": False,
@@ -686,6 +777,8 @@ async def add_trader_endpoint(request_data: dict = None):
         
     except Exception as e:
         logger.error(f"Add trader endpoint error: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         return {
             "status": "error",
             "success": False,
@@ -693,6 +786,13 @@ async def add_trader_endpoint(request_data: dict = None):
             "message": f"Failed to add trader: {str(e)}",
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
+
+
+
+
+
+
+
 
 
 @discovery_router.delete("/copy/traders/{trader_id}")

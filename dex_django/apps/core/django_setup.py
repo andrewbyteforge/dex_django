@@ -38,7 +38,7 @@ def setup_django() -> bool:
         
         # Configure Django settings BEFORE importing django
         if not os.environ.get('DJANGO_SETTINGS_MODULE'):
-            os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.settings')
+            os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.dex_django.settings')
             logger.debug("Set DJANGO_SETTINGS_MODULE environment variable")
         
         # NOW import django after environment is set

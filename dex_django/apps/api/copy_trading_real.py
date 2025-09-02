@@ -12,18 +12,51 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel, Field, validator
 
-# Import Django ORM models
+# Import Django ORM models with correct path structure
 try:
-    from apps.ledger.models import CopyTrade, FollowedTrader
-    from apps.intelligence.models import WalletAnalysis, TraderCandidate
-    from django.db import transaction
+    import django
+    from django.conf import settings
+    from django.db import connection, transaction
     from django.utils import timezone as django_timezone
-    DJANGO_AVAILABLE = True
-except ImportError:
+    
+    # Check if Django is properly configured
+    if not settings.configured:
+        DJANGO_AVAILABLE = False
+        django_error = "Django not configured"
+    else:
+        # Try to import models from correct Django app structure
+        try:
+            from dex_django.apps.ledger.models import CopyTrade, FollowedTrader
+            from dex_django.apps.intelligence.models import WalletAnalysis, TraderCandidate
+            DJANGO_AVAILABLE = True
+            django_error = None
+        except ImportError as e:
+            # Try alternative import paths
+            try:
+                from apps.ledger.models import CopyTrade, FollowedTrader
+                from apps.intelligence.models import WalletAnalysis, TraderCandidate
+                DJANGO_AVAILABLE = True
+                django_error = None
+            except ImportError:
+                # Fall back to raw SQL queries only
+                DJANGO_AVAILABLE = True  # Can still use raw SQL through connection
+                django_error = f"Models not available, using raw SQL: {e}"
+        
+except ImportError as e:
     DJANGO_AVAILABLE = False
+    django_error = f"Django import failed: {e}"
+except Exception as e:
+    DJANGO_AVAILABLE = False
+    django_error = f"Django configuration error: {e}"
 
 router = APIRouter(prefix="/api/v1/copy", tags=["copy-trading-real"])
 logger = logging.getLogger("api.copy_trading")
+
+# Log Django availability status at startup
+if DJANGO_AVAILABLE:
+    logger.info(f"Django available for copy trading API. {django_error or 'Full ORM available'}")
+else:
+    logger.warning(f"Django NOT available for copy trading API: {django_error}")
 
 # Request/Response Models
 class AddTraderRequest(BaseModel):
@@ -93,6 +126,32 @@ class AnalyzeWalletRequest(BaseModel):
         return v.lower()
 
 
+# Database Table Existence Check
+def check_database_tables() -> Dict[str, bool]:
+    """Check if required database tables exist."""
+    if not DJANGO_AVAILABLE:
+        return {"ledger_followedtrader": False, "ledger_copytrade": False}
+    
+    try:
+        with connection.cursor() as cursor:
+            # Check if tables exist
+            cursor.execute("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name IN ('ledger_followedtrader', 'ledger_copytrade')
+            """)
+            existing_tables = [row[0] for row in cursor.fetchall()]
+            
+            return {
+                "ledger_followedtrader": "ledger_followedtrader" in existing_tables,
+                "ledger_copytrade": "ledger_copytrade" in existing_tables
+            }
+    except Exception as e:
+        logger.error(f"Failed to check database tables: {e}")
+        return {"ledger_followedtrader": False, "ledger_copytrade": False}
+
+
 # Utility Functions
 def get_mock_trader_performance() -> Dict[str, Any]:
     """Generate realistic mock performance data."""
@@ -136,6 +195,85 @@ def create_mock_discovered_wallet(address: str = None, chain: str = "ethereum") 
     }
 
 
+async def create_followed_trader_table_if_needed() -> bool:
+    """Create the ledger_followedtrader table if it doesn't exist."""
+    if not DJANGO_AVAILABLE:
+        return False
+    
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ledger_followedtrader (
+                    id VARCHAR(36) PRIMARY KEY,
+                    wallet_address VARCHAR(42) NOT NULL,
+                    trader_name VARCHAR(100) NOT NULL,
+                    description TEXT,
+                    chain VARCHAR(20) DEFAULT 'ethereum',
+                    copy_mode VARCHAR(20) DEFAULT 'percentage',
+                    copy_percentage DECIMAL(5,2) DEFAULT 3.0,
+                    fixed_amount_usd DECIMAL(10,2),
+                    max_position_usd DECIMAL(10,2) DEFAULT 1000.0,
+                    min_trade_value_usd DECIMAL(10,2) DEFAULT 50.0,
+                    max_slippage_bps INTEGER DEFAULT 300,
+                    copy_buy_only BOOLEAN DEFAULT FALSE,
+                    copy_sell_only BOOLEAN DEFAULT FALSE,
+                    status VARCHAR(20) DEFAULT 'active',
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    UNIQUE(wallet_address) WHERE is_active = TRUE
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_followedtrader_wallet 
+                ON ledger_followedtrader(wallet_address, is_active)
+            """)
+            
+        logger.info("Created ledger_followedtrader table")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to create ledger_followedtrader table: {e}")
+        return False
+
+
+async def create_copy_trade_table_if_needed() -> bool:
+    """Create the ledger_copytrade table if it doesn't exist."""
+    if not DJANGO_AVAILABLE:
+        return False
+    
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ledger_copytrade (
+                    id VARCHAR(36) PRIMARY KEY,
+                    followed_trader_id VARCHAR(36) REFERENCES ledger_followedtrader(id),
+                    token_symbol VARCHAR(20),
+                    action VARCHAR(10),
+                    copy_amount_usd DECIMAL(15,2),
+                    status VARCHAR(20) DEFAULT 'pending',
+                    pnl_usd DECIMAL(15,2) DEFAULT 0,
+                    chain VARCHAR(20) DEFAULT 'ethereum',
+                    copy_tx_hash VARCHAR(66),
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_copytrade_trader 
+                ON ledger_copytrade(followed_trader_id, created_at)
+            """)
+            
+        logger.info("Created ledger_copytrade table")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to create ledger_copytrade table: {e}")
+        return False
+
+
 async def get_real_trader_data() -> List[Dict[str, Any]]:
     """Get real trader data from database or external sources."""
     if not DJANGO_AVAILABLE:
@@ -143,16 +281,15 @@ async def get_real_trader_data() -> List[Dict[str, Any]]:
         return []
     
     try:
-        # Query real followed traders from database
+        # Ensure table exists
+        await create_followed_trader_table_if_needed()
+        
         traders = []
         
-        # Use Django ORM to get followed traders
-        from django.db import connection
-        
-        # Raw SQL query as fallback if models aren't ready
+        # Use raw SQL query since it's more reliable than ORM
         with connection.cursor() as cursor:
             cursor.execute("""
-                SELECT wallet_address, trader_name, description, chain, 
+                SELECT id, wallet_address, trader_name, description, chain, 
                        copy_percentage, max_position_usd, status, created_at
                 FROM ledger_followedtrader 
                 WHERE is_active = true
@@ -163,23 +300,24 @@ async def get_real_trader_data() -> List[Dict[str, Any]]:
             for row in cursor.fetchall():
                 performance = get_mock_trader_performance()
                 traders.append({
-                    "id": str(uuid.uuid4()),
-                    "wallet_address": row[0],
-                    "trader_name": row[1] or f"Trader_{row[0][-4:]}",
-                    "description": row[2] or "",
-                    "chain": row[3] or "ethereum",
-                    "copy_percentage": float(row[4] or 3.0),
-                    "max_position_usd": float(row[5] or 1000.0),
-                    "status": row[6] or "active",
-                    "created_at": row[7].isoformat() if row[7] else datetime.now().isoformat(),
+                    "id": str(row[0]),
+                    "wallet_address": row[1],
+                    "trader_name": row[2] or f"Trader_{row[1][-4:]}",
+                    "description": row[3] or "",
+                    "chain": row[4] or "ethereum",
+                    "copy_percentage": float(row[5] or 3.0),
+                    "max_position_usd": float(row[6] or 1000.0),
+                    "status": row[7] or "active",
+                    "created_at": row[8].isoformat() if row[8] else datetime.now().isoformat(),
                     **performance
                 })
         
+        logger.info(f"Retrieved {len(traders)} followed traders from database")
         return traders
         
     except Exception as e:
         logger.error(f"Failed to get real trader data: {e}")
-        # Return mock data as fallback
+        # Return empty list instead of mock data to signal the error
         return []
 
 
@@ -190,7 +328,9 @@ async def get_real_copy_trades(status_filter: str = None, limit: int = 50) -> Li
         return []
     
     try:
-        from django.db import connection
+        # Ensure tables exist
+        await create_followed_trader_table_if_needed()
+        await create_copy_trade_table_if_needed()
         
         trades = []
         
@@ -201,11 +341,12 @@ async def get_real_copy_trades(status_filter: str = None, limit: int = 50) -> Li
                    ct.created_at, ct.chain, ct.copy_tx_hash
             FROM ledger_copytrade ct
             JOIN ledger_followedtrader ft ON ct.followed_trader_id = ft.id
+            WHERE ft.is_active = true
         """
         params = []
         
         if status_filter:
-            sql += " WHERE ct.status = %s"
+            sql += " AND ct.status = %s"
             params.append(status_filter)
         
         sql += " ORDER BY ct.created_at DESC LIMIT %s"
@@ -229,6 +370,7 @@ async def get_real_copy_trades(status_filter: str = None, limit: int = 50) -> Li
                     "tx_hash": row[10]
                 })
         
+        logger.info(f"Retrieved {len(trades)} copy trades from database")
         return trades
         
     except Exception as e:
@@ -283,14 +425,6 @@ async def perform_wallet_analysis(address: str, chain: str, days_back: int) -> D
                 "recommendation": f"{'Strong' if quality_score > 85 else 'Moderate'} candidate for copy trading with {'high' if quality_score > 85 else 'medium'} confidence level."
             }
         }
-        
-        # Store analysis in database if possible
-        if DJANGO_AVAILABLE:
-            try:
-                # Save to database for caching
-                pass  # TODO: Implement database storage
-            except Exception as e:
-                logger.error(f"Failed to store analysis: {e}")
         
         return analysis_result
         
@@ -361,6 +495,8 @@ async def get_copy_trading_status() -> Dict[str, Any]:
             "total_trades": len(trades),
             "success_rate": round(success_rate, 1),
             "total_pnl_usd": round(total_pnl, 2),
+            "database_available": DJANGO_AVAILABLE,
+            "database_error": django_error,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
@@ -369,6 +505,8 @@ async def get_copy_trading_status() -> Dict[str, Any]:
         return {
             "status": "error",
             "error": str(e),
+            "database_available": DJANGO_AVAILABLE,
+            "database_error": django_error,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
@@ -383,6 +521,7 @@ async def list_followed_traders() -> Dict[str, Any]:
             "status": "ok",
             "data": traders,
             "count": len(traders),
+            "database_available": DJANGO_AVAILABLE,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
@@ -392,7 +531,8 @@ async def list_followed_traders() -> Dict[str, Any]:
             "status": "error", 
             "data": [],
             "count": 0,
-            "error": str(e)
+            "error": str(e),
+            "database_available": DJANGO_AVAILABLE
         }
 
 
@@ -403,21 +543,41 @@ async def add_followed_trader(request: AddTraderRequest) -> Dict[str, Any]:
         logger.info(f"Adding trader: {request.wallet_address}")
         
         if not DJANGO_AVAILABLE:
-            raise HTTPException(500, "Database not available")
+            logger.error("Django/Database not available for adding trader")
+            return {
+                "status": "error",
+                "error": f"Database not available: {django_error}",
+                "message": "Cannot add trader without database connection"
+            }
+        
+        # Ensure table exists first
+        table_created = await create_followed_trader_table_if_needed()
+        if not table_created:
+            logger.error("Failed to create or verify trader table")
+            return {
+                "status": "error",
+                "error": "Database table creation failed",
+                "message": "Cannot add trader without proper database tables"
+            }
         
         # Check if trader already exists
-        from django.db import connection
-        
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT id FROM ledger_followedtrader WHERE wallet_address = %s AND is_active = true",
                 [request.wallet_address]
             )
             if cursor.fetchone():
-                raise HTTPException(400, "Trader already being followed")
+                logger.warning(f"Trader {request.wallet_address} already exists")
+                return {
+                    "status": "error",
+                    "error": "Trader already being followed",
+                    "message": f"Wallet {request.wallet_address} is already in your followed traders list"
+                }
         
         # Insert new trader
         trader_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc)
+        
         with connection.cursor() as cursor:
             cursor.execute("""
                 INSERT INTO ledger_followedtrader (
@@ -431,7 +591,7 @@ async def add_followed_trader(request: AddTraderRequest) -> Dict[str, Any]:
                 request.chain, request.copy_mode, request.copy_percentage, 
                 request.fixed_amount_usd, request.max_position_usd, request.min_trade_value_usd,
                 request.max_slippage_bps, request.copy_buy_only, request.copy_sell_only,
-                "active", True, django_timezone.now(), django_timezone.now()
+                "active", True, now, now
             ])
         
         # Get performance data for response
@@ -446,7 +606,7 @@ async def add_followed_trader(request: AddTraderRequest) -> Dict[str, Any]:
             "copy_percentage": request.copy_percentage,
             "max_position_usd": request.max_position_usd,
             "status": "active",
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": now.isoformat(),
             **performance
         }
         
@@ -458,11 +618,13 @@ async def add_followed_trader(request: AddTraderRequest) -> Dict[str, Any]:
             "trader": trader_data
         }
         
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Failed to add trader {request.wallet_address}: {e}")
-        raise HTTPException(500, f"Failed to add trader: {str(e)}")
+        logger.error(f"Failed to add trader {request.wallet_address}: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": f"Failed to add trader: {str(e)}",
+            "message": "An error occurred while adding the trader. Please try again."
+        }
 
 
 @router.delete("/traders/{trader_id}")
@@ -470,29 +632,34 @@ async def remove_trader(trader_id: str) -> Dict[str, Any]:
     """Remove a followed trader."""
     try:
         if not DJANGO_AVAILABLE:
-            raise HTTPException(500, "Database not available")
-        
-        from django.db import connection
+            return {
+                "status": "error",
+                "error": f"Database not available: {django_error}"
+            }
         
         with connection.cursor() as cursor:
             cursor.execute(
                 "UPDATE ledger_followedtrader SET is_active = false, updated_at = %s WHERE id = %s",
-                [django_timezone.now(), trader_id]
+                [datetime.now(timezone.utc), trader_id]
             )
             
             if cursor.rowcount == 0:
-                raise HTTPException(404, "Trader not found")
+                return {
+                    "status": "error",
+                    "error": "Trader not found"
+                }
         
         return {
             "status": "ok",
             "message": "Trader removed successfully"
         }
         
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Failed to remove trader {trader_id}: {e}")
-        raise HTTPException(500, f"Failed to remove trader: {str(e)}")
+        return {
+            "status": "error",
+            "error": f"Failed to remove trader: {str(e)}"
+        }
 
 
 @router.get("/trades")
@@ -547,8 +714,6 @@ async def discover_traders(request: DiscoveryRequest) -> Dict[str, Any]:
 async def get_discovery_status() -> Dict[str, Any]:
     """Get discovery system status with real metrics."""
     try:
-        # TODO: Get real discovery status from background processes
-        
         return {
             "status": "ok",
             "discovery_running": False,
@@ -595,12 +760,16 @@ async def analyze_wallet(request: AnalyzeWalletRequest) -> Dict[str, Any]:
 @router.get("/health")
 async def copy_trading_health() -> Dict[str, Any]:
     """Health check for copy trading system."""
+    table_status = check_database_tables() if DJANGO_AVAILABLE else {}
+    
     return {
         "status": "healthy",
         "django_available": DJANGO_AVAILABLE,
         "database_connected": DJANGO_AVAILABLE,
+        "database_error": django_error,
+        "tables_exist": table_status,
         "services": {
-            "trader_monitoring": "active",
+            "trader_monitoring": "active" if DJANGO_AVAILABLE else "degraded",
             "discovery_engine": "active",
             "trade_executor": "standby"
         },
