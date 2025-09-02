@@ -3,6 +3,9 @@ import { Card, Button, Table, Badge, Alert, Spinner, Modal, Form, Row, Col, Butt
 import { useDjangoData, djangoApi } from '../hooks/useDjangoApi';
 
 export function LiveOpportunitiesCard() {
+    // ===========================================
+    // STATE MANAGEMENT
+    // ===========================================
     const [autoRefresh, setAutoRefresh] = useState(true);
     const [lastUpdate, setLastUpdate] = useState(null);
     const [selectedOpportunity, setSelectedOpportunity] = useState(null);
@@ -11,20 +14,23 @@ export function LiveOpportunitiesCard() {
     const [showAnalysisModal, setShowAnalysisModal] = useState(false);
     const refreshIntervalRef = useRef(null);
 
-    // Filter states
+    // Filter states - controls which opportunities to show
     const [filters, setFilters] = useState({
         minScore: 0,
         maxScore: 30,
         minLiquidity: 0,
         maxLiquidity: 1000000,
         selectedChains: new Set(['ethereum', 'bsc', 'base', 'polygon', 'solana']),
-        selectedSources: new Set(['dexscreener', 'coingecko_trending', 'jupiter'])
+        selectedSources: new Set(['dexscreener', 'coingecko_trending', 'jupiter', '1inch', 'uniswap_v3', 'pancakeswap'])
     });
 
-    // Pagination states
+    // Pagination states - controls table display
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(20);
 
+    // ===========================================
+    // DATA FETCHING HOOKS
+    // ===========================================
     const {
         data: opportunitiesData,
         loading,
@@ -37,16 +43,31 @@ export function LiveOpportunitiesCard() {
         refresh: refreshStats
     } = useDjangoData('/api/v1/opportunities/stats', {});
 
+    // Extract raw opportunities from API response
     const rawOpportunities = opportunitiesData?.opportunities || [];
 
-    // Filter and sort opportunities (latest first, then by score)
+    // DEBUG: Log first opportunity to see actual field structure
+    useEffect(() => {
+        if (rawOpportunities.length > 0) {
+            console.log('Backend opportunity data structure:', rawOpportunities[0]);
+            console.log('Available fields:', Object.keys(rawOpportunities[0]));
+        }
+    }, [rawOpportunities]);
+
+    // ===========================================
+    // DATA PROCESSING & FILTERING
+    // ===========================================
+
+    // Filter and sort opportunities based on user selections
     const filteredOpportunities = useMemo(() => {
         return rawOpportunities.filter(opp => {
-            const score = opp.opportunity_score || 0;
-            const liquidity = opp.estimated_liquidity_usd || 0;
+            // Map backend fields to frontend expectations with fallbacks
+            const score = opp.opportunity_score || opp.score || 0;
+            const liquidity = opp.estimated_liquidity_usd || opp.liquidity_usd || opp.liquidity || 0;
             const chain = opp.chain || 'unknown';
             const source = opp.source || 'unknown';
 
+            // Apply all filter criteria
             return (
                 score >= filters.minScore &&
                 score <= filters.maxScore &&
@@ -57,16 +78,18 @@ export function LiveOpportunitiesCard() {
             );
         }).sort((a, b) => {
             // Sort by timestamp first (latest first), then by score (highest first)
-            const timeA = new Date(a.timestamp || 0).getTime();
-            const timeB = new Date(b.timestamp || 0).getTime();
+            const timeA = new Date(a.timestamp || a.created_at || 0).getTime();
+            const timeB = new Date(b.timestamp || b.created_at || 0).getTime();
             if (timeB !== timeA) {
                 return timeB - timeA; // Latest first
             }
-            return (b.opportunity_score || 0) - (a.opportunity_score || 0); // Then by score
+            const scoreA = a.opportunity_score || a.score || 0;
+            const scoreB = b.opportunity_score || b.score || 0;
+            return scoreB - scoreA; // Then by score (highest first)
         });
     }, [rawOpportunities, filters]);
 
-    // Paginate opportunities
+    // Paginate filtered opportunities for table display
     const totalPages = Math.ceil(filteredOpportunities.length / itemsPerPage);
     const paginatedOpportunities = useMemo(() => {
         const startIndex = (currentPage - 1) * itemsPerPage;
@@ -76,7 +99,10 @@ export function LiveOpportunitiesCard() {
 
     const opportunities = paginatedOpportunities;
 
-    // Auto-refresh mechanism
+    // ===========================================
+    // AUTO-REFRESH MECHANISM
+    // ===========================================
+
     useEffect(() => {
         if (autoRefresh) {
             refreshIntervalRef.current = setInterval(() => {
@@ -84,7 +110,7 @@ export function LiveOpportunitiesCard() {
                 refresh();
                 refreshStats();
                 setLastUpdate(new Date());
-            }, 15000);
+            }, 15000); // Refresh every 15 seconds
         } else {
             if (refreshIntervalRef.current) {
                 clearInterval(refreshIntervalRef.current);
@@ -97,6 +123,10 @@ export function LiveOpportunitiesCard() {
             }
         };
     }, [autoRefresh, refresh, refreshStats]);
+
+    // ===========================================
+    // EVENT HANDLERS
+    // ===========================================
 
     const handleManualRefresh = async () => {
         setLastUpdate(new Date());
@@ -141,15 +171,19 @@ export function LiveOpportunitiesCard() {
             minLiquidity: 0,
             maxLiquidity: 1000000,
             selectedChains: new Set(['ethereum', 'bsc', 'base', 'polygon', 'solana']),
-            selectedSources: new Set(['dexscreener', 'coingecko_trending', 'jupiter'])
+            selectedSources: new Set(['dexscreener', 'coingecko_trending', 'jupiter', '1inch', 'uniswap_v3', 'pancakeswap'])
         });
-        setCurrentPage(1); // Reset to first page when filters change
+        setCurrentPage(1);
     };
 
     // Reset to page 1 when filters change
     useEffect(() => {
         setCurrentPage(1);
     }, [filters]);
+
+    // ===========================================
+    // PAGINATION HANDLERS
+    // ===========================================
 
     const handlePageChange = (page) => {
         setCurrentPage(Math.max(1, Math.min(page, totalPages)));
@@ -160,24 +194,29 @@ export function LiveOpportunitiesCard() {
         setCurrentPage(1);
     };
 
+    // ===========================================
+    // OPPORTUNITY ANALYSIS
+    // ===========================================
+
     const analyzeOpportunity = async (opportunity) => {
-        console.log('Analyze button clicked for:', opportunity.pair_address);
+        console.log('Analyze button clicked for:', opportunity.pair_address || opportunity.address);
         setSelectedOpportunity(opportunity);
         setAnalyzing(true);
         setAnalysisResult(null);
         setShowAnalysisModal(true);
 
         try {
+            // Map opportunity fields with fallbacks for API request
             const requestData = {
-                pair_address: opportunity.pair_address || '',
+                pair_address: opportunity.pair_address || opportunity.address || '',
                 chain: opportunity.chain || 'ethereum',
                 dex: opportunity.dex || 'unknown',
-                token0_symbol: opportunity.token0_symbol || 'TOKEN0',
-                token1_symbol: opportunity.token1_symbol || 'TOKEN1',
-                estimated_liquidity_usd: opportunity.estimated_liquidity_usd || 0,
-                timestamp: opportunity.timestamp || new Date().toISOString(),
+                token0_symbol: opportunity.token0_symbol || opportunity.base_symbol || 'TOKEN0',
+                token1_symbol: opportunity.token1_symbol || opportunity.quote_symbol || 'TOKEN1',
+                estimated_liquidity_usd: opportunity.estimated_liquidity_usd || opportunity.liquidity_usd || 0,
+                timestamp: opportunity.timestamp || opportunity.created_at || new Date().toISOString(),
                 source: opportunity.source || 'unknown',
-                opportunity_score: opportunity.opportunity_score || 0,
+                opportunity_score: opportunity.opportunity_score || opportunity.score || 0,
                 trade_amount_eth: 0.1
             };
 
@@ -200,6 +239,10 @@ export function LiveOpportunitiesCard() {
         setAnalyzing(false);
     };
 
+    // ===========================================
+    // UTILITY FUNCTIONS
+    // ===========================================
+
     const formatTimeAgo = (timestamp) => {
         if (!timestamp) return 'Never';
         try {
@@ -216,9 +259,21 @@ export function LiveOpportunitiesCard() {
         }
     };
 
+    // Helper function to safely get field values with fallbacks
+    const getFieldValue = (opp, primaryField, fallbackField, defaultValue = '') => {
+        return opp[primaryField] || opp[fallbackField] || defaultValue;
+    };
+
+    // ===========================================
+    // COMPONENT RENDER
+    // ===========================================
+
     return (
         <>
             <Card className="mb-4">
+                {/* ===========================================
+                    CARD HEADER - Title, Counts, Controls
+                    =========================================== */}
                 <Card.Header className="d-flex justify-content-between align-items-center">
                     <div className="d-flex align-items-center gap-2">
                         <strong>Live Opportunities</strong>
@@ -266,6 +321,9 @@ export function LiveOpportunitiesCard() {
                 </Card.Header>
 
                 <Card.Body>
+                    {/* ===========================================
+                        ERROR DISPLAY
+                        =========================================== */}
                     {error && (
                         <Alert variant="danger" className="mb-3">
                             <strong>Error:</strong> {error.message || error}
@@ -277,7 +335,9 @@ export function LiveOpportunitiesCard() {
                         </Alert>
                     )}
 
-                    {/* Filter Controls */}
+                    {/* ===========================================
+                        FILTER CONTROLS
+                        =========================================== */}
                     <Card className="mb-3 bg-light">
                         <Card.Body className="py-2">
                             <div className="d-flex justify-content-between align-items-center mb-2">
@@ -357,19 +417,25 @@ export function LiveOpportunitiesCard() {
                                     </div>
                                 </Col>
 
-                                {/* Source Filter */}
+                                {/* Source Filter - Updated with all sources */}
                                 <Col md={3}>
                                     <Form.Label className="small mb-1">Sources</Form.Label>
                                     <div className="d-flex flex-wrap gap-1">
-                                        {['dexscreener', 'coingecko_trending', 'jupiter'].map(source => (
+                                        {[
+                                            { key: 'dexscreener', label: 'DEX' },
+                                            { key: 'coingecko_trending', label: 'CG' },
+                                            { key: 'jupiter', label: 'JUP' },
+                                            { key: '1inch', label: '1INCH' },
+                                            { key: 'uniswap_v3', label: 'UNI' },
+                                            { key: 'pancakeswap', label: 'CAKE' }
+                                        ].map(({ key, label }) => (
                                             <Badge
-                                                key={source}
-                                                bg={filters.selectedSources.has(source) ? 'success' : 'outline-secondary'}
+                                                key={key}
+                                                bg={filters.selectedSources.has(key) ? 'success' : 'outline-secondary'}
                                                 style={{ cursor: 'pointer' }}
-                                                onClick={() => handleSourceToggle(source)}
+                                                onClick={() => handleSourceToggle(key)}
                                             >
-                                                {source === 'dexscreener' ? 'DEX' :
-                                                    source === 'coingecko_trending' ? 'CG' : 'JUP'}
+                                                {label}
                                             </Badge>
                                         ))}
                                     </div>
@@ -378,7 +444,9 @@ export function LiveOpportunitiesCard() {
                         </Card.Body>
                     </Card>
 
-                    {/* Stats Summary */}
+                    {/* ===========================================
+                        STATS SUMMARY
+                        =========================================== */}
                     {stats && (
                         <div className="row mb-3">
                             <div className="col-md-3 text-center">
@@ -388,7 +456,10 @@ export function LiveOpportunitiesCard() {
                             </div>
                             <div className="col-md-3 text-center">
                                 <div className="fw-bold">High Liquidity</div>
-                                <div className="fs-5">{filteredOpportunities.filter(o => (o.estimated_liquidity_usd || 0) >= 50000).length}</div>
+                                <div className="fs-5">{filteredOpportunities.filter(o => {
+                                    const liquidity = o.estimated_liquidity_usd || o.liquidity_usd || 0;
+                                    return liquidity >= 50000;
+                                }).length}</div>
                             </div>
                             <div className="col-md-3 text-center">
                                 <div className="fw-bold">Chains Active</div>
@@ -398,7 +469,10 @@ export function LiveOpportunitiesCard() {
                                 <div className="fw-bold">Avg Score</div>
                                 <div className="fs-6">
                                     {filteredOpportunities.length > 0
-                                        ? (filteredOpportunities.reduce((sum, o) => sum + (o.opportunity_score || 0), 0) / filteredOpportunities.length).toFixed(1)
+                                        ? (filteredOpportunities.reduce((sum, o) => {
+                                            const score = o.opportunity_score || o.score || 0;
+                                            return sum + score;
+                                        }, 0) / filteredOpportunities.length).toFixed(1)
                                         : '0.0'
                                     }
                                 </div>
@@ -406,7 +480,9 @@ export function LiveOpportunitiesCard() {
                         </div>
                     )}
 
-                    {/* Pagination Controls - Top */}
+                    {/* ===========================================
+                        PAGINATION CONTROLS - TOP
+                        =========================================== */}
                     {filteredOpportunities.length > itemsPerPage && (
                         <div className="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
                             <div className="d-flex align-items-center gap-2">
@@ -435,7 +511,6 @@ export function LiveOpportunitiesCard() {
                                     onClick={() => handlePageChange(currentPage - 1)}
                                 />
 
-                                {/* Show page numbers around current page */}
                                 {Array.from({ length: Math.min(7, totalPages) }, (_, i) => {
                                     let pageNum;
                                     if (totalPages <= 7) {
@@ -476,7 +551,9 @@ export function LiveOpportunitiesCard() {
                         </div>
                     )}
 
-                    {/* Loading State */}
+                    {/* ===========================================
+                        LOADING STATE
+                        =========================================== */}
                     {loading && opportunities.length === 0 && (
                         <div className="text-center py-4">
                             <Spinner animation="border" />
@@ -484,7 +561,9 @@ export function LiveOpportunitiesCard() {
                         </div>
                     )}
 
-                    {/* Opportunities Table */}
+                    {/* ===========================================
+                        OPPORTUNITIES TABLE - MAIN DATA DISPLAY
+                        =========================================== */}
                     {opportunities.length > 0 ? (
                         <div className="table-responsive">
                             <Table striped hover size="sm">
@@ -501,69 +580,105 @@ export function LiveOpportunitiesCard() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {opportunities.map((opp, index) => (
-                                        <tr key={`${opp.pair_address}-${index}`}>
-                                            <td>
-                                                <strong>{opp.base_symbol || 'TOKEN'}</strong>
-                                                <span className="text-muted">/</span>
-                                                <span>{opp.quote_symbol || 'WETH'}</span>
-                                                <div className="small text-muted font-monospace">
-                                                    {opp.address?.slice(0, 8)}...
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <Badge bg="secondary">{opp.chain || 'unknown'}</Badge>
-                                            </td>
-                                            <td>
-                                                <Badge bg="info">{opp.dex || 'unknown'}</Badge>
-                                            </td>
-                                            <td>
-                                                <span className={
-                                                    (opp.liquidity_usd || 0) >= 100000 ? 'text-success fw-bold' :
-                                                        (opp.liquidity_usd || 0) >= 50000 ? 'text-warning' :
-                                                            'text-danger'
-                                                }>
-                                                    ${(opp.liquidity_usd || 0).toLocaleString()}
-                                                </span>
-                                            </td>
-                                            <td>
-                                                <Badge
-                                                    bg={opp.source === 'dexscreener' ? 'success' :
-                                                        opp.source === 'coingecko_trending' ? 'warning' :
-                                                            opp.source === 'jupiter' ? 'primary' : 'secondary'}
-                                                >
-                                                    {opp.source || 'unknown'}
-                                                </Badge>
-                                            </td>
-                                            <td>
-                                                <Badge bg={
-                                                    (opp.score || 0) >= 8 ? 'success' :
-                                                        (opp.score || 0) >= 6 ? 'warning' : 'secondary'
-                                                }>
-                                                    {opp.score ? opp.score.toFixed(1) : 'N/A'}
-                                                </Badge>
-                                            </td>
-                                            <td>
-                                                <small className="text-muted">
-                                                    {formatTimeAgo(opp.created_at)}
-                                                </small>
-                                            </td>
-                                            <td>
-                                                <Button
-                                                    size="sm"
-                                                    variant="outline-primary"
-                                                    onClick={() => analyzeOpportunity(opp)}
-                                                    disabled={analyzing}
-                                                >
-                                                    {analyzing ? 'Analyzing...' : 'Analyze'}
-                                                </Button>
-                                            </td>
-                                        </tr>
-                                    ))}
+                                    {opportunities.map((opp, index) => {
+                                        // Map fields with multiple fallback options
+                                        const baseSymbol = getFieldValue(opp, 'base_symbol', 'token0_symbol', 'TOKEN');
+                                        const quoteSymbol = getFieldValue(opp, 'quote_symbol', 'token1_symbol', 'WETH');
+                                        const address = getFieldValue(opp, 'address', 'pair_address', '');
+                                        const chain = getFieldValue(opp, 'chain', '', 'unknown');
+                                        const dex = getFieldValue(opp, 'dex', '', 'unknown');
+                                        const liquidity = opp.liquidity_usd || opp.estimated_liquidity_usd || 0;
+                                        const source = getFieldValue(opp, 'source', '', 'unknown');
+                                        const score = opp.score || opp.opportunity_score || 0;
+                                        const timestamp = opp.created_at || opp.timestamp;
+
+                                        return (
+                                            <tr key={`${address}-${index}`}>
+                                                {/* Token Pair Column */}
+                                                <td>
+                                                    <strong>{baseSymbol}</strong>
+                                                    <span className="text-muted">/</span>
+                                                    <span>{quoteSymbol}</span>
+                                                    {address && (
+                                                        <div className="small text-muted font-monospace">
+                                                            {address.slice(0, 8)}...
+                                                        </div>
+                                                    )}
+                                                </td>
+
+                                                {/* Chain Column */}
+                                                <td>
+                                                    <Badge bg="secondary">{chain}</Badge>
+                                                </td>
+
+                                                {/* DEX Column */}
+                                                <td>
+                                                    <Badge bg="info">{dex}</Badge>
+                                                </td>
+
+                                                {/* Liquidity Column - Color coded by amount */}
+                                                <td>
+                                                    <span className={
+                                                        liquidity >= 100000 ? 'text-success fw-bold' :
+                                                            liquidity >= 50000 ? 'text-warning' :
+                                                                'text-danger'
+                                                    }>
+                                                        ${liquidity.toLocaleString()}
+                                                    </span>
+                                                </td>
+
+                                                {/* Source Column - Color coded by source type */}
+                                                <td>
+                                                    <Badge
+                                                        bg={source === 'dexscreener' ? 'success' :
+                                                            source === 'coingecko_trending' ? 'warning' :
+                                                                source === 'jupiter' ? 'primary' :
+                                                                    source === '1inch' ? 'info' :
+                                                                        source === 'uniswap_v3' ? 'success' :
+                                                                            source === 'pancakeswap' ? 'warning' : 'secondary'}
+                                                    >
+                                                        {source}
+                                                    </Badge>
+                                                </td>
+
+                                                {/* Score Column - Color coded by score value */}
+                                                <td>
+                                                    <Badge bg={
+                                                        score >= 8 ? 'success' :
+                                                            score >= 6 ? 'warning' : 'secondary'
+                                                    }>
+                                                        {score ? score.toFixed(1) : 'N/A'}
+                                                    </Badge>
+                                                </td>
+
+                                                {/* Time Column */}
+                                                <td>
+                                                    <small className="text-muted">
+                                                        {formatTimeAgo(timestamp)}
+                                                    </small>
+                                                </td>
+
+                                                {/* Actions Column */}
+                                                <td>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline-primary"
+                                                        onClick={() => analyzeOpportunity(opp)}
+                                                        disabled={analyzing}
+                                                    >
+                                                        {analyzing ? 'Analyzing...' : 'Analyze'}
+                                                    </Button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                             </Table>
                         </div>
                     ) : (
+                        /* ===========================================
+                            NO DATA STATE
+                            =========================================== */
                         !loading && (
                             <Alert variant="info">
                                 {rawOpportunities.length === 0
@@ -574,7 +689,9 @@ export function LiveOpportunitiesCard() {
                         )
                     )}
 
-                    {/* Pagination Controls - Bottom */}
+                    {/* ===========================================
+                        PAGINATION CONTROLS - BOTTOM
+                        =========================================== */}
                     {filteredOpportunities.length > itemsPerPage && (
                         <div className="d-flex justify-content-center mt-3 border-top pt-3">
                             <Pagination>
@@ -624,7 +741,9 @@ export function LiveOpportunitiesCard() {
                 </Card.Body>
             </Card>
 
-            {/* Analysis Modal */}
+            {/* ===========================================
+                ANALYSIS MODAL - DETAILED OPPORTUNITY ANALYSIS
+                =========================================== */}
             <Modal
                 show={showAnalysisModal}
                 onHide={closeModal}
@@ -635,7 +754,7 @@ export function LiveOpportunitiesCard() {
                 <Modal.Header closeButton>
                     <Modal.Title>
                         AI Analysis - {selectedOpportunity ?
-                            `${selectedOpportunity.token0_symbol}/${selectedOpportunity.token1_symbol}` :
+                            `${getFieldValue(selectedOpportunity, 'token0_symbol', 'base_symbol', 'TOKEN0')}/${getFieldValue(selectedOpportunity, 'token1_symbol', 'quote_symbol', 'TOKEN1')}` :
                             'Loading...'}
                     </Modal.Title>
                 </Modal.Header>

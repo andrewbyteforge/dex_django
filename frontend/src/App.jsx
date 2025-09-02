@@ -128,7 +128,7 @@ export default function App() {
     useEffect(() => {
         const loadCopyTradingStats = async () => {
             try {
-                const response = await fetch('/api/v1/copy/status');
+                const response = await fetch('http://127.0.0.1:8000/api/v1/copy/status'); // ← Fix
                 const data = await response.json();
                 setCopyTradingStats(data);
             } catch (error) {
