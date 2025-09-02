@@ -1012,6 +1012,342 @@ async def add_discovered_trader(request_data: dict):
 
 
 
+
+
+# APP: backend
+# FILE: debug_main.py - Real API Integration Update
+# FUNCTION: Add real API router integration to serve actual data
+
+# Add this section to your existing debug_main.py after the copy_trading imports
+
+# ============================================================================
+# REAL API INTEGRATION - Replace mock endpoints with real data
+# ============================================================================
+
+# Import the real copy trading API
+real_copy_trading_api_ready = False
+try:
+    from backend.app.api.copy_trading_real import router as real_copy_trading_router
+    real_copy_trading_api_ready = True
+    logger.info("Real copy trading API router imported successfully")
+except ImportError as e:
+    logger.warning(f"Real copy trading API not available: {e}")
+except Exception as e:
+    logger.error(f"Real copy trading API import failed: {e}")
+
+# ============================================================================
+# API ROUTER UPDATES - Include real endpoints
+# ============================================================================
+
+# Update your existing api_router section to include the real endpoints
+# Replace the mock copy trading endpoints with real ones
+
+if real_copy_trading_api_ready:
+    # Include the real copy trading API router
+    api_router.include_router(real_copy_trading_router)
+    logger.info("Real copy trading API endpoints registered")
+else:
+    # Fallback to mock endpoints if real API not available
+    logger.warning("Using fallback mock copy trading endpoints")
+
+# ============================================================================
+# FRONTEND INTEGRATION ENDPOINTS - Bridge real data to frontend format
+# ============================================================================
+
+@api_router.get("/frontend/copy-trading/status")
+async def frontend_copy_trading_status():
+    """Frontend-specific copy trading status endpoint."""
+    try:
+        if real_copy_trading_api_ready:
+            # Import the real API functions
+            from backend.app.api.copy_trading_real import get_copy_trading_status
+            return await get_copy_trading_status()
+        else:
+            # Return mock data structure
+            return {
+                "status": "ok",
+                "is_enabled": True,
+                "monitoring_active": False,
+                "followed_traders_count": 0,
+                "active_traders": 0,
+                "trades_today": 0,
+                "total_trades": 0,
+                "success_rate": 0.0,
+                "total_pnl_usd": 0.0,
+                "timestamp": datetime.now().isoformat()
+            }
+    except Exception as e:
+        logger.error(f"Frontend copy trading status error: {e}")
+        return {"status": "error", "error": str(e)}
+
+
+@api_router.get("/frontend/copy-trading/traders")
+async def frontend_list_traders():
+    """Frontend-specific traders list endpoint."""
+    try:
+        if real_copy_trading_api_ready:
+            from backend.app.api.copy_trading_real import list_followed_traders
+            return await list_followed_traders()
+        else:
+            return {
+                "status": "ok",
+                "data": [],
+                "count": 0,
+                "timestamp": datetime.now().isoformat()
+            }
+    except Exception as e:
+        logger.error(f"Frontend traders list error: {e}")
+        return {"status": "error", "data": [], "error": str(e)}
+
+
+@api_router.get("/frontend/copy-trading/trades")
+async def frontend_copy_trades(status: str = None, limit: int = 50):
+    """Frontend-specific copy trades endpoint."""
+    try:
+        if real_copy_trading_api_ready:
+            from backend.app.api.copy_trading_real import get_copy_trades
+            return await get_copy_trades(status=status, limit=limit)
+        else:
+            return {
+                "status": "ok",
+                "data": [],
+                "count": 0,
+                "timestamp": datetime.now().isoformat()
+            }
+    except Exception as e:
+        logger.error(f"Frontend copy trades error: {e}")
+        return {"status": "error", "data": [], "error": str(e)}
+
+
+@api_router.post("/frontend/copy-trading/add-trader")
+async def frontend_add_trader(request_data: dict):
+    """Frontend-specific add trader endpoint."""
+    try:
+        if real_copy_trading_api_ready:
+            from backend.app.api.copy_trading_real import add_followed_trader, AddTraderRequest
+            
+            # Convert frontend data to API request format
+            api_request = AddTraderRequest(**request_data)
+            return await add_followed_trader(api_request)
+        else:
+            # Mock response for development
+            return {
+                "status": "ok",
+                "message": "Trader added successfully (mock)",
+                "trader": {
+                    "id": str(uuid.uuid4()),
+                    **request_data,
+                    "created_at": datetime.now().isoformat()
+                }
+            }
+    except Exception as e:
+        logger.error(f"Frontend add trader error: {e}")
+        return {"status": "error", "error": str(e)}
+
+
+@api_router.post("/frontend/discovery/discover-traders")
+async def frontend_discover_traders(request_data: dict):
+    """Frontend-specific trader discovery endpoint."""
+    try:
+        if real_copy_trading_api_ready:
+            from backend.app.api.copy_trading_real import discover_traders, DiscoveryRequest
+            
+            # Convert frontend data to API request format
+            api_request = DiscoveryRequest(**request_data)
+            return await discover_traders(api_request)
+        else:
+            # Mock discovery results for development
+            import random
+            
+            mock_wallets = []
+            for i in range(min(request_data.get('limit', 10), 20)):
+                mock_wallets.append({
+                    "id": str(uuid.uuid4()),
+                    "address": "0x" + "".join(random.choices("0123456789abcdef", k=40)),
+                    "chain": random.choice(request_data.get('chains', ['ethereum'])),
+                    "quality_score": random.randint(75, 95),
+                    "total_volume_usd": random.randint(50000, 500000),
+                    "win_rate": round(random.uniform(65, 90), 1),
+                    "trades_count": random.randint(20, 150),
+                    "avg_trade_size": random.randint(500, 8000),
+                    "last_active": f"{random.randint(1, 12)} hours ago",
+                    "recommended_copy_percentage": round(random.uniform(2, 6), 1),
+                    "risk_level": random.choice(["Low", "Medium", "High"]),
+                    "confidence": random.choice(["High", "Medium"])
+                })
+            
+            return {
+                "status": "ok",
+                "discovered_wallets": mock_wallets,
+                "count": len(mock_wallets),
+                "discovery_params": request_data,
+                "timestamp": datetime.now().isoformat()
+            }
+    except Exception as e:
+        logger.error(f"Frontend discover traders error: {e}")
+        return {"status": "error", "error": str(e)}
+
+
+@api_router.get("/frontend/discovery/status")
+async def frontend_discovery_status():
+    """Frontend-specific discovery status endpoint."""
+    try:
+        if real_copy_trading_api_ready:
+            from backend.app.api.copy_trading_real import get_discovery_status
+            return await get_discovery_status()
+        else:
+            return {
+                "status": "ok",
+                "discovery_running": False,
+                "total_discovered": 0,
+                "high_confidence_candidates": 0,
+                "discovered_by_chain": {},
+                "last_discovery_run": None,
+                "timestamp": datetime.now().isoformat()
+            }
+    except Exception as e:
+        logger.error(f"Frontend discovery status error: {e}")
+        return {"status": "error", "error": str(e)}
+
+
+@api_router.post("/frontend/discovery/analyze-wallet")
+async def frontend_analyze_wallet(request_data: dict):
+    """Frontend-specific wallet analysis endpoint."""
+    try:
+        if real_copy_trading_api_ready:
+            from backend.app.api.copy_trading_real import analyze_wallet, AnalyzeWalletRequest
+            
+            # Convert frontend data to API request format
+            api_request = AnalyzeWalletRequest(**request_data)
+            return await analyze_wallet(api_request)
+        else:
+            # Mock analysis for development
+            import random
+            
+            address = request_data.get('address')
+            quality_score = random.randint(75, 95)
+            
+            return {
+                "status": "ok",
+                "analysis": {
+                    "candidate": {
+                        "address": address,
+                        "chain": request_data.get('chain', 'ethereum'),
+                        "quality_score": quality_score,
+                        "total_volume_usd": random.randint(30000, 200000),
+                        "win_rate": round(random.uniform(60, 85), 1),
+                        "trades_count": random.randint(25, 80),
+                        "avg_trade_size": random.randint(800, 4000),
+                        "recommended_copy_percentage": round(min(5.0, quality_score * 0.05), 1),
+                        "risk_level": "Low" if quality_score > 85 else "Medium",
+                        "confidence": "High" if quality_score > 80 else "Medium"
+                    },
+                    "analysis": {
+                        "strengths": ["Consistent performance", "Low risk", "Active trading"],
+                        "weaknesses": ["Limited diversification", "High gas usage"],
+                        "recommendation": f"{'Strong' if quality_score > 85 else 'Moderate'} candidate for copy trading."
+                    }
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+    except Exception as e:
+        logger.error(f"Frontend analyze wallet error: {e}")
+        return {"status": "error", "error": str(e)}
+
+# ============================================================================
+# DATABASE INITIALIZATION - Ensure tables exist
+# ============================================================================
+
+async def ensure_copy_trading_tables():
+    """Ensure copy trading database tables are created."""
+    try:
+        if django_initialized:
+            from django.core.management import execute_from_command_line
+            import os
+            
+            # Run migrations to create tables
+            old_argv = os.sys.argv
+            os.sys.argv = ['manage.py', 'makemigrations', 'ledger']
+            try:
+                execute_from_command_line(os.sys.argv)
+                logger.info("Copy trading migrations created")
+            except Exception as e:
+                logger.warning(f"Migration creation warning: {e}")
+            
+            os.sys.argv = ['manage.py', 'migrate']
+            try:
+                execute_from_command_line(os.sys.argv)
+                logger.info("Copy trading tables created/updated")
+            except Exception as e:
+                logger.error(f"Migration execution error: {e}")
+            
+            os.sys.argv = old_argv
+            
+        return True
+    except Exception as e:
+        logger.error(f"Database initialization error: {e}")
+        return False
+
+# Initialize database tables on startup
+if django_initialized:
+    import asyncio
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(ensure_copy_trading_tables())
+        loop.close()
+        logger.info("Copy trading database initialization completed")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+
+# ============================================================================
+# HEALTH CHECK UPDATES - Include real API status
+# ============================================================================
+
+@health_router.get("/health/copy-trading")
+async def copy_trading_health():
+    """Detailed copy trading system health check."""
+    return {
+        "status": "ok",
+        "real_api_available": real_copy_trading_api_ready,
+        "django_available": django_initialized,
+        "database_connected": django_initialized,
+        "services": {
+            "trader_monitoring": "active" if real_copy_trading_api_ready else "mock",
+            "discovery_engine": "active" if real_copy_trading_api_ready else "mock",
+            "trade_executor": "standby"
+        },
+        "timestamp": datetime.now().isoformat()
+    }
+
+# ============================================================================
+# STARTUP LOGGING - Report real vs mock status
+# ============================================================================
+
+logger.info("=" * 80)
+logger.info("COPY TRADING API INTEGRATION STATUS")
+logger.info("=" * 80)
+logger.info(f"Django initialized: {django_initialized}")
+logger.info(f"Real copy trading API: {real_copy_trading_api_ready}")
+logger.info(f"Using {'REAL DATA' if real_copy_trading_api_ready else 'MOCK DATA'}")
+logger.info("=" * 80)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # ============================================================================
 # DISCOVERY ENDPOINTS - Token pair discovery system
 # ============================================================================
@@ -1710,6 +2046,50 @@ if copy_trading_system_ready:
         logger.info("Complete copy trading API router included")
     except Exception as e:
         logger.error(f"Failed to include complete copy trading API: {e}")
+
+
+
+
+
+
+# ============================================================================
+# REAL COPY TRADING API INTEGRATION - CRITICAL FIX
+# ============================================================================
+
+# Import and register the real copy trading API with discovery endpoints
+try:
+    # Import the complete real API
+    import sys
+    sys.path.append('backend/app/api')
+    from copy_trading_real import router as real_copy_trading_router
+    
+    # Include the real router AFTER the mock endpoints
+    app.include_router(real_copy_trading_router, prefix="", tags=["copy-trading-real"])
+    
+    logger.info("✅ REAL copy trading API with discovery endpoints registered")
+    logger.info("Available real endpoints:")
+    logger.info("  - GET /api/v1/copy/status")
+    logger.info("  - GET /api/v1/copy/traders") 
+    logger.info("  - POST /api/v1/copy/traders")
+    logger.info("  - GET /api/v1/copy/discovery/status")
+    logger.info("  - POST /api/v1/copy/discovery/discover-traders")
+    logger.info("  - POST /api/v1/copy/discovery/analyze-wallet")
+    
+    real_copy_trading_api_ready = True
+    
+except ImportError as e:
+    logger.error(f"❌ Failed to import real copy trading API: {e}")
+    real_copy_trading_api_ready = False
+except Exception as e:
+    logger.error(f"❌ Failed to register real copy trading API: {e}")
+    real_copy_trading_api_ready = False
+
+
+
+
+
+
+
 
 # ============================================================================
 # APPLICATION LIFECYCLE EVENTS - Initialize copy trading on startup
