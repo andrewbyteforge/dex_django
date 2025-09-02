@@ -19,9 +19,13 @@ export function LiveOpportunitiesCard() {
         minScore: 0,
         maxScore: 30,
         minLiquidity: 0,
-        maxLiquidity: 1000000,
+        maxLiquidity: 10000000,  // Increased to 10M to catch high liquidity opportunities
         selectedChains: new Set(['ethereum', 'bsc', 'base', 'polygon', 'solana']),
-        selectedDexes: new Set(['quickswap', 'jupiter', '1inch', 'uniswap_v3', 'pancakeswap', 'osmosis', 'sushiswap', 'uniswap_v2', 'unknown', 'coingecko', 'dexscreener'])
+        selectedDexes: new Set([
+            'quickswap', 'jupiter', '1inch', 'uniswap_v3', 'uniswap_v2', 'uniswap',
+            'pancakeswap', 'osmosis', 'sushiswap', 'unknown', 'coingecko', 'dexscreener',
+            'spookyswap', 'raydium', 'protofi', 'sunswap', 'spiritswap', 'beethovenx'
+        ])
     });
 
     // Pagination states - controls table display
@@ -42,6 +46,7 @@ export function LiveOpportunitiesCard() {
         data: stats,
         refresh: refreshStats
     } = useDjangoData('/api/v1/opportunities/stats', {});
+
     console.log("Full API response:", opportunitiesData);
     // Extract raw opportunities from API response
     const rawOpportunities = opportunitiesData?.opportunities || [];
@@ -82,8 +87,8 @@ export function LiveOpportunitiesCard() {
             if (timeB !== timeA) {
                 return timeB - timeA; // Latest first
             }
-            const scoreA = a.score || 0;
-            const scoreB = b.score || 0;
+            const scoreA = a.opportunity_score || a.score || 0;
+            const scoreB = b.opportunity_score || b.score || 0;
             return scoreB - scoreA; // Then by score (highest first)
         });
 
@@ -183,9 +188,13 @@ export function LiveOpportunitiesCard() {
             minScore: 0,
             maxScore: 30,
             minLiquidity: 0,
-            maxLiquidity: 1000000,
+            maxLiquidity: 10000000,
             selectedChains: new Set(['ethereum', 'bsc', 'base', 'polygon', 'solana']),
-            selectedDexes: new Set(['quickswap', 'jupiter', '1inch', 'uniswap_v3', 'pancakeswap', 'osmosis', 'sushiswap', 'uniswap_v2', 'unknown', 'coingecko', 'dexscreener'])
+            selectedDexes: new Set([
+                'quickswap', 'jupiter', '1inch', 'uniswap_v3', 'uniswap_v2', 'uniswap',
+                'pancakeswap', 'osmosis', 'sushiswap', 'unknown', 'coingecko', 'dexscreener',
+                'spookyswap', 'raydium', 'protofi', 'sunswap', 'spiritswap', 'beethovenx'
+            ])
         });
         setCurrentPage(1);
     };
@@ -387,7 +396,7 @@ export function LiveOpportunitiesCard() {
                                     </Form.Group>
                                 </Col>
 
-                                {/* Liquidity Range Slider */}
+                                {/* Liquidity Range Slider - Updated max value */}
                                 <Col md={3}>
                                     <Form.Group>
                                         <Form.Label className="small mb-1">
@@ -396,16 +405,16 @@ export function LiveOpportunitiesCard() {
                                         <div className="d-flex gap-2">
                                             <Form.Range
                                                 min={0}
-                                                max={1000000}
-                                                step={5000}
+                                                max={10000000}
+                                                step={10000}
                                                 value={filters.minLiquidity}
                                                 onChange={(e) => handleFilterChange('minLiquidity', Number(e.target.value))}
                                                 className="flex-grow-1"
                                             />
                                             <Form.Range
                                                 min={0}
-                                                max={1000000}
-                                                step={5000}
+                                                max={10000000}
+                                                step={10000}
                                                 value={filters.maxLiquidity}
                                                 onChange={(e) => handleFilterChange('maxLiquidity', Number(e.target.value))}
                                                 className="flex-grow-1"
@@ -431,21 +440,24 @@ export function LiveOpportunitiesCard() {
                                     </div>
                                 </Col>
 
-                                {/* DEX Filter - Updated to use dexes */}
+                                {/* DEX Filter - Updated with all DEXes */}
                                 <Col md={3}>
                                     <Form.Label className="small mb-1">DEXes</Form.Label>
                                     <div className="d-flex flex-wrap gap-1">
                                         {[
-                                            { key: 'quickswap', label: 'QUICK' },
-                                            { key: 'jupiter', label: 'JUP' },
-                                            { key: '1inch', label: '1INCH' },
-                                            { key: 'uniswap_v3', label: 'UNI' },
-                                            { key: 'pancakeswap', label: 'CAKE' }
+                                            { key: 'uniswap', label: 'UNI' },
+                                            { key: 'osmosis', label: 'OSMO' },
+                                            { key: 'raydium', label: 'RAY' },
+                                            { key: 'spookyswap', label: 'BOO' },
+                                            { key: 'sushiswap', label: 'SUSHI' },
+                                            { key: 'pancakeswap', label: 'CAKE' },
+                                            { key: 'beethovenx', label: 'BEETS' },
+                                            { key: 'spiritswap', label: 'SPIRIT' }
                                         ].map(({ key, label }) => (
                                             <Badge
                                                 key={key}
                                                 bg={filters.selectedDexes.has(key) ? 'success' : 'outline-secondary'}
-                                                style={{ cursor: 'pointer' }}
+                                                style={{ cursor: 'pointer', fontSize: '0.7rem' }}
                                                 onClick={() => handleDexToggle(key)}
                                             >
                                                 {label}
@@ -470,7 +482,7 @@ export function LiveOpportunitiesCard() {
                             <div className="col-md-3 text-center">
                                 <div className="fw-bold">High Liquidity</div>
                                 <div className="fs-5">{filteredOpportunities.filter(o => {
-                                    const liquidity = o.liquidity_usd || 0;
+                                    const liquidity = o.estimated_liquidity_usd || o.liquidity_usd || 0;
                                     return liquidity >= 50000;
                                 }).length}</div>
                             </div>
@@ -483,7 +495,7 @@ export function LiveOpportunitiesCard() {
                                 <div className="fs-6">
                                     {filteredOpportunities.length > 0
                                         ? (filteredOpportunities.reduce((sum, o) => {
-                                            const score = o.score || 0;
+                                            const score = o.opportunity_score || o.score || 0;
                                             return sum + score;
                                         }, 0) / filteredOpportunities.length).toFixed(1)
                                         : '0.0'
@@ -626,6 +638,7 @@ export function LiveOpportunitiesCard() {
                                         <th>DEX</th>
                                         <th>Liquidity</th>
                                         <th>Volume 24h</th>
+                                        <th>Price Change</th>
                                         <th>Score</th>
                                         <th>Risk</th>
                                         <th>Time</th>
@@ -634,17 +647,15 @@ export function LiveOpportunitiesCard() {
                                 </thead>
                                 <tbody>
                                     {opportunities.map((opp, index) => {
-                                        // Extract symbol components if available
-                                        const symbol = opp.symbol || '';
-                                        const [baseSymbol, quoteSymbol] = symbol.includes('/')
-                                            ? symbol.split('/')
-                                            : [symbol || 'TOKEN', 'UNKNOWN'];
-
-                                        const address = opp.address || opp.id || '';
+                                        // Use actual backend fields
+                                        const token0 = opp.token0_symbol || 'TOKEN0';
+                                        const token1 = opp.token1_symbol || 'TOKEN1';
+                                        const address = opp.pair_address || opp.address || '';
                                         const chain = opp.chain || 'unknown';
                                         const dex = opp.dex || 'unknown';
                                         const liquidity = opp.estimated_liquidity_usd || opp.liquidity_usd || 0;
-                                        const volume24h = opp.volume_24h_usd || 0;
+                                        const volume24h = opp.volume_24h || 0;
+                                        const priceChange = opp.price_change_24h || 0;
                                         const score = opp.opportunity_score || opp.score || 0;
                                         const riskLevel = opp.risk_level || 'unknown';
                                         const timestamp = opp.timestamp || opp.created_at;
@@ -653,9 +664,9 @@ export function LiveOpportunitiesCard() {
                                             <tr key={`${address}-${index}`}>
                                                 {/* Token Pair Column */}
                                                 <td>
-                                                    <strong>{baseSymbol}</strong>
+                                                    <strong>{token0}</strong>
                                                     <span className="text-muted">/</span>
-                                                    <span>{quoteSymbol}</span>
+                                                    <span>{token1}</span>
                                                     {address && (
                                                         <div className="small text-muted font-monospace">
                                                             {address.slice(0, 8)}...
@@ -692,6 +703,17 @@ export function LiveOpportunitiesCard() {
                                                                 'text-muted'
                                                     }>
                                                         ${volume24h.toLocaleString()}
+                                                    </span>
+                                                </td>
+
+                                                {/* Price Change Column */}
+                                                <td>
+                                                    <span className={
+                                                        priceChange > 0 ? 'text-success' :
+                                                            priceChange < 0 ? 'text-danger' :
+                                                                'text-muted'
+                                                    }>
+                                                        {priceChange > 0 ? '+' : ''}{priceChange.toFixed(2)}%
                                                     </span>
                                                 </td>
 
@@ -807,8 +829,8 @@ export function LiveOpportunitiesCard() {
             </Card>
 
             {/* ===========================================
-        ENHANCED ANALYSIS MODAL - DISPLAYS ALL BACKEND DATA
-        =========================================== */}
+                ENHANCED ANALYSIS MODAL - DISPLAYS ALL BACKEND DATA
+                =========================================== */}
             <Modal
                 show={showAnalysisModal}
                 onHide={closeModal}
@@ -845,8 +867,8 @@ export function LiveOpportunitiesCard() {
                             ) : (
                                 <div>
                                     {/* ===========================================
-                                EXECUTIVE SUMMARY
-                                =========================================== */}
+                                        EXECUTIVE SUMMARY
+                                        =========================================== */}
                                     <Card className="mb-3 border-primary">
                                         <Card.Header className="bg-primary text-white">
                                             <h5 className="mb-0">Executive Summary</h5>
@@ -903,8 +925,8 @@ export function LiveOpportunitiesCard() {
                                     </Card>
 
                                     {/* ===========================================
-                                RECOMMENDATION DETAILS
-                                =========================================== */}
+                                        RECOMMENDATION DETAILS
+                                        =========================================== */}
                                     {analysisResult.recommendation && (
                                         <Card className="mb-3">
                                             <Card.Header>
@@ -934,8 +956,8 @@ export function LiveOpportunitiesCard() {
                                     )}
 
                                     {/* ===========================================
-                                LIQUIDITY ANALYSIS
-                                =========================================== */}
+                                        LIQUIDITY ANALYSIS
+                                        =========================================== */}
                                     {analysisResult.liquidity_analysis && (
                                         <Card className="mb-3">
                                             <Card.Header>
@@ -966,8 +988,8 @@ export function LiveOpportunitiesCard() {
                                     )}
 
                                     {/* ===========================================
-                                RISK ASSESSMENT
-                                =========================================== */}
+                                        RISK ASSESSMENT
+                                        =========================================== */}
                                     {analysisResult.risk_assessment && (
                                         <Card className="mb-3">
                                             <Card.Header>
@@ -1032,8 +1054,8 @@ export function LiveOpportunitiesCard() {
                                     )}
 
                                     {/* ===========================================
-                                TOKEN ANALYSIS
-                                =========================================== */}
+                                        TOKEN ANALYSIS
+                                        =========================================== */}
                                     {analysisResult.token_analysis && (
                                         <Card className="mb-3">
                                             <Card.Header>
@@ -1069,8 +1091,8 @@ export function LiveOpportunitiesCard() {
                                     )}
 
                                     {/* ===========================================
-                                TRADING SIGNALS
-                                =========================================== */}
+                                        TRADING SIGNALS
+                                        =========================================== */}
                                     {analysisResult.trading_signals && (
                                         <Card className="mb-3">
                                             <Card.Header>
@@ -1118,8 +1140,8 @@ export function LiveOpportunitiesCard() {
                                     )}
 
                                     {/* ===========================================
-                                METADATA & WARNINGS
-                                =========================================== */}
+                                        METADATA & WARNINGS
+                                        =========================================== */}
                                     {analysisResult.metadata && (
                                         <Card className="mb-3">
                                             <Card.Header>
@@ -1157,8 +1179,8 @@ export function LiveOpportunitiesCard() {
                                     )}
 
                                     {/* ===========================================
-                                PAIR INFO
-                                =========================================== */}
+                                        PAIR INFO
+                                        =========================================== */}
                                     {analysisResult.pair_info && (
                                         <Card className="mb-3 bg-light">
                                             <Card.Header>

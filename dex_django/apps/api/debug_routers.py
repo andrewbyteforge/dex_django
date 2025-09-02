@@ -248,6 +248,67 @@ async def execute_mock_trade(request: MockTradeRequest) -> Dict[str, Any]:
 
 
 
+
+
+
+
+
+
+def calculate_simple_risk_level(liquidity_usd: float, volume_24h: float, price_change_24h: float = 0) -> str:
+    """
+    Calculate risk level based on liquidity, volume, and volatility.
+    Simple, self-contained calculation with no external dependencies.
+    """
+    risk_points = 0
+    
+    # Liquidity risk (0-40 points)
+    if liquidity_usd < 10000:
+        risk_points += 40
+    elif liquidity_usd < 50000:
+        risk_points += 25
+    elif liquidity_usd < 100000:
+        risk_points += 10
+    # else: 0 points for high liquidity
+    
+    # Volume risk (0-30 points)
+    if volume_24h < 5000:
+        risk_points += 30
+    elif volume_24h < 25000:
+        risk_points += 20
+    elif volume_24h < 100000:
+        risk_points += 10
+    # else: 0 points for high volume
+    
+    # Price volatility risk (0-30 points)
+    abs_change = abs(price_change_24h)
+    if abs_change > 50:  # Extreme volatility
+        risk_points += 30
+    elif abs_change > 25:
+        risk_points += 20
+    elif abs_change > 15:
+        risk_points += 10
+    # else: 0 points for stable price
+    
+    # Convert points to risk level
+    if risk_points <= 30:
+        return "low"
+    elif risk_points <= 60:
+        return "medium"
+    else:
+        return "high"
+
+
+
+
+
+
+
+
+
+
+
+
+
 import aiohttp
 from datetime import datetime, timezone
 from typing import Dict, Any, List
@@ -257,144 +318,92 @@ from typing import Dict, Any, List
 # FUNCTION: Replace the existing fetch_real_opportunities function with this improved version
 
 async def fetch_real_opportunities() -> List[Dict[str, Any]]:
-    """Fetch REAL opportunities from DexScreener and CoinGecko APIs."""
+    """Fetch REAL opportunities from DexScreener API for multiple chains."""
     opportunities = []
     
     async with aiohttp.ClientSession() as session:
-        # 1. DexScreener Ethereum pairs
-        try:
-            logger.info("Fetching DexScreener Ethereum pairs...")
-            async with session.get(
-                "https://api.dexscreener.com/latest/dex/search?q=ethereum",
-                timeout=aiohttp.ClientTimeout(total=15)
-            ) as response:
-                logger.info(f"DexScreener response status: {response.status}")
-                if response.status == 200:
-                    data = await response.json()
-                    pairs = data.get("pairs", [])
-                    logger.info(f"Found {len(pairs)} Ethereum pairs")
+        # Define chains to fetch
+        chains_to_fetch = [
+            ("ethereum", "ethereum"),
+            ("bsc", "bsc"),
+            ("base", "base"),
+            ("polygon", "polygon"),
+            ("solana", "solana")
+        ]
+        
+        for chain_name, chain_query in chains_to_fetch:
+            try:
+                logger.info(f"Fetching DexScreener {chain_name.upper()} pairs...")
+                
+                # Use search endpoint for all chains
+                url = f"https://api.dexscreener.com/latest/dex/search?q={chain_query}"
+                
+                async with session.get(
+                    url,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    logger.info(f"DexScreener {chain_name} response status: {response.status}")
                     
-                    for pair in pairs[:20]:
-                        try:
-                            liquidity_data = pair.get("liquidity", {})
-                            liquidity_usd = float(liquidity_data.get("usd", 0)) if isinstance(liquidity_data, dict) else 0
-                            
-                            # Lower threshold for testing
-                            if liquidity_usd < 5000:  # Lowered from 10000
+                    if response.status == 200:
+                        data = await response.json()
+                        pairs = data.get("pairs", [])
+                        logger.info(f"Found {len(pairs)} {chain_name} pairs")
+                        
+                        added_count = 0
+                        for pair in pairs[:15]:  # Limit to 15 per chain
+                            try:
+                                liquidity_data = pair.get("liquidity", {})
+                                liquidity_usd = float(liquidity_data.get("usd", 0)) if isinstance(liquidity_data, dict) else 0
+                                
+                                # Lower threshold for more results
+                                if liquidity_usd < 5000:
+                                    continue
+                                
+                                base_token = pair.get("baseToken", {})
+                                quote_token = pair.get("quoteToken", {})
+                                
+                                # Map chain names properly
+                                display_chain = chain_name
+                                if chain_name == "bsc":
+                                    display_chain = "bsc"
+                                
+                                # Extract values for risk calculation
+                                volume_24h = float(pair.get("volume", {}).get("h24", 0)) if pair.get("volume") else 0
+                                price_change_24h = float(pair.get("priceChange", {}).get("h24", 0)) if pair.get("priceChange") else 0
+                                
+                                # Calculate risk level
+                                risk_level = calculate_simple_risk_level(liquidity_usd, volume_24h, price_change_24h)
+                                
+                                opp = {
+                                    "chain": display_chain,
+                                    "dex": pair.get("dexId", "unknown"),
+                                    "pair_address": pair.get("pairAddress", ""),
+                                    "token0_symbol": base_token.get("symbol", "UNKNOWN"),
+                                    "token1_symbol": quote_token.get("symbol", "UNKNOWN"),
+                                    "estimated_liquidity_usd": liquidity_usd,
+                                    "volume_24h": volume_24h,
+                                    "price_change_24h": price_change_24h,
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                    "source": "dexscreener",
+                                    "opportunity_score": random.uniform(5.0, 15.0),  # Random score for variety
+                                    "risk_level": risk_level  # ADD THIS LINE
+                                }
+                                opportunities.append(opp)
+                                added_count += 1
+                                
+                            except Exception as e:
+                                logger.debug(f"Error processing {chain_name} pair: {e}")
                                 continue
-                            
-                            base_token = pair.get("baseToken", {})
-                            quote_token = pair.get("quoteToken", {})
-                            
-                            opp = {
-                                "chain": "ethereum",
-                                "dex": pair.get("dexId", "unknown"),
-                                "pair_address": pair.get("pairAddress", ""),
-                                "token0_symbol": base_token.get("symbol", "UNKNOWN"),
-                                "token1_symbol": quote_token.get("symbol", "UNKNOWN"),
-                                "estimated_liquidity_usd": liquidity_usd,
-                                "volume_24h": float(pair.get("volume", {}).get("h24", 0)) if pair.get("volume") else 0,
-                                "price_change_24h": float(pair.get("priceChange", {}).get("h24", 0)) if pair.get("priceChange") else 0,
-                                "timestamp": datetime.now(timezone.utc).isoformat(),
-                                "source": "dexscreener",
-                                "opportunity_score": 10.0
-                            }
-                            opportunities.append(opp)
-                            logger.debug(f"Added ETH pair: {base_token.get('symbol')}/{quote_token.get('symbol')} - ${liquidity_usd:,.0f}")
-                        except Exception as e:
-                            logger.debug(f"Error processing pair: {e}")
-                            continue
-                    
-                    logger.info(f"Added {len([o for o in opportunities if o['chain'] == 'ethereum'])} Ethereum opportunities")
-                else:
-                    logger.error(f"DexScreener API returned status {response.status}")
-        except Exception as e:
-            logger.error(f"DexScreener Ethereum error: {e}")
+                        
+                        logger.info(f"Added {added_count} {chain_name} opportunities")
+                    else:
+                        logger.error(f"DexScreener {chain_name} API returned status {response.status}")
+                        
+            except Exception as e:
+                logger.error(f"DexScreener {chain_name} error: {e}")
+                continue
         
-        # 2. DexScreener BSC pairs
-        try:
-            logger.info("Fetching DexScreener BSC pairs...")
-            async with session.get(
-                "https://api.dexscreener.com/latest/dex/pairs/bsc",
-                timeout=aiohttp.ClientTimeout(total=15)
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    pairs = data.get("pairs", [])
-                    logger.info(f"Found {len(pairs)} BSC pairs")
-                    
-                    for pair in pairs[:15]:
-                        try:
-                            liquidity_data = pair.get("liquidity", {})
-                            liquidity_usd = float(liquidity_data.get("usd", 0)) if isinstance(liquidity_data, dict) else 0
-                            
-                            if liquidity_usd < 5000:
-                                continue
-                            
-                            base_token = pair.get("baseToken", {})
-                            quote_token = pair.get("quoteToken", {})
-                            
-                            opp = {
-                                "chain": "bsc",
-                                "dex": pair.get("dexId", "pancakeswap"),
-                                "pair_address": pair.get("pairAddress", ""),
-                                "token0_symbol": base_token.get("symbol", "UNKNOWN"),
-                                "token1_symbol": quote_token.get("symbol", "UNKNOWN"),
-                                "estimated_liquidity_usd": liquidity_usd,
-                                "volume_24h": float(pair.get("volume", {}).get("h24", 0)) if pair.get("volume") else 0,
-                                "price_change_24h": float(pair.get("priceChange", {}).get("h24", 0)) if pair.get("priceChange") else 0,
-                                "timestamp": datetime.now(timezone.utc).isoformat(),
-                                "source": "dexscreener",
-                                "opportunity_score": 8.0
-                            }
-                            opportunities.append(opp)
-                        except Exception as e:
-                            logger.debug(f"Error processing BSC pair: {e}")
-                            continue
-                    
-                    logger.info(f"Added {len([o for o in opportunities if o.get('chain') == 'bsc'])} BSC opportunities")
-        except Exception as e:
-            logger.error(f"DexScreener BSC error: {e}")
-        
-        # 3. CoinGecko trending tokens (as fallback/additional data)
-        try:
-            logger.info("Fetching CoinGecko trending tokens...")
-            async with session.get(
-                "https://api.dexscreener.com/latest/dex/tokens/trending",
-                timeout=aiohttp.ClientTimeout(total=15)
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    trending_coins = data.get("coins", [])
-                    logger.info(f"Found {len(trending_coins)} trending coins")
-                    
-                    for coin in trending_coins[:10]:
-                        try:
-                            item = coin.get("item", {})
-                            opp = {
-                                "chain": "ethereum",  # Default to ETH
-                                "dex": "coingecko",
-                                "pair_address": f"coingecko_{item.get('id', '')}",
-                                "token0_symbol": item.get("symbol", "").upper(),
-                                "token1_symbol": "USDT",
-                                "estimated_liquidity_usd": 100000,  # Estimated
-                                "volume_24h": 50000,  # Estimated
-                                "price_change_24h": 0,
-                                "market_cap_rank": item.get("market_cap_rank", 0),
-                                "timestamp": datetime.now(timezone.utc).isoformat(),
-                                "source": "coingecko_trending",
-                                "opportunity_score": 7.0
-                            }
-                            opportunities.append(opp)
-                        except Exception as e:
-                            logger.debug(f"Error processing CoinGecko coin: {e}")
-                            continue
-                    
-                    logger.info(f"Added {len([o for o in opportunities if o.get('source') == 'coingecko_trending'])} CoinGecko opportunities")
-        except Exception as e:
-            logger.error(f"CoinGecko error: {e}")
-        
-        # 4. Add some guaranteed test data if no real data was fetched
+        # Add some guaranteed test data if no real data was fetched
         if len(opportunities) == 0:
             logger.warning("No real data fetched, adding test opportunities")
             test_opportunities = [
@@ -409,7 +418,8 @@ async def fetch_real_opportunities() -> List[Dict[str, Any]]:
                     "price_change_24h": 2.5,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "source": "test_data",
-                    "opportunity_score": 15.0
+                    "opportunity_score": 15.0,
+                    "risk_level": "low"  # ADD THIS LINE
                 },
                 {
                     "chain": "bsc",
@@ -422,12 +432,28 @@ async def fetch_real_opportunities() -> List[Dict[str, Any]]:
                     "price_change_24h": -1.2,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "source": "test_data",
-                    "opportunity_score": 12.0
+                    "opportunity_score": 12.0,
+                    "risk_level": "low"  # ADD THIS LINE
+                },
+                {
+                    "chain": "base",
+                    "dex": "uniswap_v3",
+                    "pair_address": "0xtest3",
+                    "token0_symbol": "BRETT",
+                    "token1_symbol": "WETH",
+                    "estimated_liquidity_usd": 75000,
+                    "volume_24h": 50000,
+                    "price_change_24h": 5.5,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "source": "test_data",
+                    "opportunity_score": 10.0,
+                    "risk_level": "medium"  # ADD THIS LINE
                 }
             ]
             opportunities.extend(test_opportunities)
     
     logger.info(f"Total opportunities fetched: {len(opportunities)}")
+    logger.info(f"Chains represented: {set(o['chain'] for o in opportunities)}")
     return opportunities
 
 
