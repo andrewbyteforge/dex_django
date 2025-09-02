@@ -795,24 +795,24 @@ return (
         </Card>
 
         {/* ===========================================
-                ANALYSIS MODAL - DETAILED OPPORTUNITY ANALYSIS
-                =========================================== */}
+        ENHANCED ANALYSIS MODAL - DISPLAYS ALL BACKEND DATA
+        =========================================== */}
         <Modal
             show={showAnalysisModal}
             onHide={closeModal}
-            size="lg"
+            size="xl"  // Changed to extra large for more data
             backdrop="static"
             keyboard={false}
         >
             <Modal.Header closeButton>
                 <Modal.Title>
-                    AI Analysis - {selectedOpportunity ?
+                    Detailed Analysis - {selectedOpportunity ?
                         `${getFieldValue(selectedOpportunity, 'token0_symbol', 'base_symbol', 'TOKEN0')}/${getFieldValue(selectedOpportunity, 'token1_symbol', 'quote_symbol', 'TOKEN1')}` :
                         'Loading...'}
                 </Modal.Title>
             </Modal.Header>
             <Modal.Body>
-                <div style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+                <div style={{ maxHeight: '80vh', overflowY: 'auto' }}>
                     {analyzing ? (
                         <div className="text-center py-4">
                             <Spinner animation="border" />
@@ -822,41 +822,349 @@ return (
                         analysisResult.error ? (
                             <Alert variant="danger">
                                 <strong>Analysis Error:</strong> {analysisResult.error}
+                                {analysisResult.details && (
+                                    <div className="mt-2 small">
+                                        <strong>Status:</strong> {analysisResult.details.status_code}<br />
+                                        <strong>URL:</strong> {analysisResult.details.url}<br />
+                                        <strong>Trace ID:</strong> {analysisResult.details.trace_id}
+                                    </div>
+                                )}
                             </Alert>
                         ) : (
                             <div>
-                                <div className="row mb-3">
-                                    <div className="col-md-6">
-                                        <strong>Risk Score:</strong> {analysisResult.risk_score || 'N/A'}
-                                    </div>
-                                    <div className="col-md-6">
-                                        <strong>Recommendation:</strong>
-                                        <Badge bg={
-                                            analysisResult.recommendation === 'buy' ? 'success' :
-                                                analysisResult.recommendation === 'hold' ? 'warning' : 'danger'
-                                        } className="ms-2">
-                                            {analysisResult.recommendation || 'N/A'}
-                                        </Badge>
-                                    </div>
-                                </div>
+                                {/* ===========================================
+                                EXECUTIVE SUMMARY
+                                =========================================== */}
+                                <Card className="mb-3 border-primary">
+                                    <Card.Header className="bg-primary text-white">
+                                        <h5 className="mb-0">Executive Summary</h5>
+                                    </Card.Header>
+                                    <Card.Body>
+                                        <Row>
+                                            <Col md={3}>
+                                                <div className="text-center">
+                                                    <div className="fw-bold">Action</div>
+                                                    <Badge
+                                                        bg={
+                                                            analysisResult.recommendation?.action === 'BUY' ? 'success' :
+                                                                analysisResult.recommendation?.action === 'CONSIDER' ? 'warning' :
+                                                                    analysisResult.recommendation?.action === 'MONITOR' ? 'info' : 'danger'
+                                                        }
+                                                        className="fs-6"
+                                                    >
+                                                        {analysisResult.recommendation?.action || 'N/A'}
+                                                    </Badge>
+                                                </div>
+                                            </Col>
+                                            <Col md={3}>
+                                                <div className="text-center">
+                                                    <div className="fw-bold">Confidence</div>
+                                                    <div className="fs-5">
+                                                        {analysisResult.recommendation?.confidence ?
+                                                            `${(analysisResult.recommendation.confidence * 100).toFixed(1)}%` : 'N/A'}
+                                                    </div>
+                                                </div>
+                                            </Col>
+                                            <Col md={3}>
+                                                <div className="text-center">
+                                                    <div className="fw-bold">Risk Level</div>
+                                                    <Badge
+                                                        bg={
+                                                            analysisResult.risk_assessment?.risk_level === 'low' ? 'success' :
+                                                                analysisResult.risk_assessment?.risk_level === 'medium' ? 'warning' : 'danger'
+                                                        }
+                                                    >
+                                                        {analysisResult.risk_assessment?.risk_level || 'N/A'}
+                                                    </Badge>
+                                                </div>
+                                            </Col>
+                                            <Col md={3}>
+                                                <div className="text-center">
+                                                    <div className="fw-bold">Position Size</div>
+                                                    <Badge bg="info">
+                                                        {analysisResult.recommendation?.position_size || 'N/A'}
+                                                    </Badge>
+                                                </div>
+                                            </Col>
+                                        </Row>
+                                    </Card.Body>
+                                </Card>
 
-                                {analysisResult.liquidity_risk && (
-                                    <div className="mb-2">
-                                        <strong>Liquidity Risk:</strong> {analysisResult.liquidity_risk}
-                                    </div>
+                                {/* ===========================================
+                                RECOMMENDATION DETAILS
+                                =========================================== */}
+                                {analysisResult.recommendation && (
+                                    <Card className="mb-3">
+                                        <Card.Header>
+                                            <h6 className="mb-0">Trading Recommendation</h6>
+                                        </Card.Header>
+                                        <Card.Body>
+                                            <Row>
+                                                <Col md={6}>
+                                                    <div><strong>Entry Strategy:</strong> {analysisResult.recommendation.entry_strategy || 'N/A'}</div>
+                                                    <div><strong>Stop Loss:</strong> {analysisResult.recommendation.stop_loss ? `${(analysisResult.recommendation.stop_loss * 100).toFixed(1)}%` : 'N/A'}</div>
+                                                    <div><strong>Take Profit 1:</strong> {analysisResult.recommendation.take_profit_1 ? `${(analysisResult.recommendation.take_profit_1 * 100).toFixed(1)}%` : 'N/A'}</div>
+                                                </Col>
+                                                <Col md={6}>
+                                                    <div><strong>Take Profit 2:</strong> {analysisResult.recommendation.take_profit_2 ? `${(analysisResult.recommendation.take_profit_2 * 100).toFixed(1)}%` : 'N/A'}</div>
+                                                    <div><strong>Max Slippage:</strong> {analysisResult.recommendation.max_slippage ? `${(analysisResult.recommendation.max_slippage * 100).toFixed(1)}%` : 'N/A'}</div>
+                                                    <div><strong>Gas Priority:</strong> {analysisResult.recommendation.gas_priority || 'N/A'}</div>
+                                                </Col>
+                                            </Row>
+                                            {analysisResult.recommendation.rationale && (
+                                                <div className="mt-2">
+                                                    <strong>Rationale:</strong>
+                                                    <div className="text-muted">{analysisResult.recommendation.rationale}</div>
+                                                </div>
+                                            )}
+                                        </Card.Body>
+                                    </Card>
                                 )}
 
-                                {analysisResult.tax_analysis && (
-                                    <div className="mb-2">
-                                        <strong>Tax Analysis:</strong> Buy {(analysisResult.tax_analysis.buy_tax * 100).toFixed(1)}% /
-                                        Sell {(analysisResult.tax_analysis.sell_tax * 100).toFixed(1)}%
-                                    </div>
+                                {/* ===========================================
+                                LIQUIDITY ANALYSIS
+                                =========================================== */}
+                                {analysisResult.liquidity_analysis && (
+                                    <Card className="mb-3">
+                                        <Card.Header>
+                                            <h6 className="mb-0">Liquidity Analysis</h6>
+                                        </Card.Header>
+                                        <Card.Body>
+                                            <Row>
+                                                <Col md={6}>
+                                                    <div><strong>Current Liquidity:</strong> ${analysisResult.liquidity_analysis.current_liquidity_usd?.toLocaleString() || 'N/A'}</div>
+                                                    <div><strong>24h Volume:</strong> ${analysisResult.liquidity_analysis.volume_24h_usd?.toLocaleString() || 'N/A'}</div>
+                                                    <div><strong>Volume/Liquidity Ratio:</strong> {analysisResult.liquidity_analysis.volume_to_liquidity_ratio?.toFixed(3) || 'N/A'}</div>
+                                                </Col>
+                                                <Col md={6}>
+                                                    <div><strong>5% Depth:</strong> ${analysisResult.liquidity_analysis.liquidity_depth_5pct?.toLocaleString() || 'N/A'}</div>
+                                                    <div><strong>10% Depth:</strong> ${analysisResult.liquidity_analysis.liquidity_depth_10pct?.toLocaleString() || 'N/A'}</div>
+                                                    <div><strong>24h Stability:</strong>
+                                                        <Badge
+                                                            bg={analysisResult.liquidity_analysis.liquidity_stability_24h === 'stable' ? 'success' : 'warning'}
+                                                            className="ms-1"
+                                                        >
+                                                            {analysisResult.liquidity_analysis.liquidity_stability_24h || 'N/A'}
+                                                        </Badge>
+                                                    </div>
+                                                </Col>
+                                            </Row>
+                                        </Card.Body>
+                                    </Card>
                                 )}
 
-                                {analysisResult.confidence && (
-                                    <div className="mb-2">
-                                        <strong>Confidence:</strong> {(analysisResult.confidence * 100).toFixed(1)}%
-                                    </div>
+                                {/* ===========================================
+                                RISK ASSESSMENT
+                                =========================================== */}
+                                {analysisResult.risk_assessment && (
+                                    <Card className="mb-3">
+                                        <Card.Header>
+                                            <h6 className="mb-0">Risk Assessment</h6>
+                                        </Card.Header>
+                                        <Card.Body>
+                                            <Row>
+                                                <Col md={6}>
+                                                    <div><strong>Contract Verification:</strong>
+                                                        <Badge
+                                                            bg={analysisResult.risk_assessment.contract_verification === 'verified' ? 'success' : 'danger'}
+                                                            className="ms-1"
+                                                        >
+                                                            {analysisResult.risk_assessment.contract_verification || 'N/A'}
+                                                        </Badge>
+                                                    </div>
+                                                    <div><strong>Honeypot Risk:</strong>
+                                                        <Badge
+                                                            bg={
+                                                                analysisResult.risk_assessment.honeypot_risk === 'low' ? 'success' :
+                                                                    analysisResult.risk_assessment.honeypot_risk === 'medium' ? 'warning' : 'danger'
+                                                            }
+                                                            className="ms-1"
+                                                        >
+                                                            {analysisResult.risk_assessment.honeypot_risk || 'N/A'}
+                                                        </Badge>
+                                                    </div>
+                                                    <div><strong>Ownership Risk:</strong>
+                                                        <Badge
+                                                            bg={analysisResult.risk_assessment.ownership_risk === 'renounced' ? 'success' : 'warning'}
+                                                            className="ms-1"
+                                                        >
+                                                            {analysisResult.risk_assessment.ownership_risk || 'N/A'}
+                                                        </Badge>
+                                                    </div>
+                                                </Col>
+                                                <Col md={6}>
+                                                    <div><strong>Buy Tax:</strong> {analysisResult.risk_assessment.buy_tax ? `${(analysisResult.risk_assessment.buy_tax * 100).toFixed(1)}%` : '0.0%'}</div>
+                                                    <div><strong>Sell Tax:</strong> {analysisResult.risk_assessment.sell_tax ? `${(analysisResult.risk_assessment.sell_tax * 100).toFixed(1)}%` : '0.0%'}</div>
+                                                    <div><strong>Liquidity Locked:</strong>
+                                                        <Badge
+                                                            bg={analysisResult.risk_assessment.liquidity_locked ? 'success' : 'danger'}
+                                                            className="ms-1"
+                                                        >
+                                                            {analysisResult.risk_assessment.liquidity_locked ? 'Yes' : 'No'}
+                                                        </Badge>
+                                                    </div>
+                                                </Col>
+                                            </Row>
+                                            <Row className="mt-2">
+                                                <Col md={12}>
+                                                    <div><strong>Risk Score:</strong>
+                                                        <span className="ms-1 fw-bold">{analysisResult.risk_assessment.risk_score?.toFixed(1) || 'N/A'}/10</span>
+                                                    </div>
+                                                    {analysisResult.risk_assessment.lock_duration_days && (
+                                                        <div><strong>Lock Duration:</strong> {analysisResult.risk_assessment.lock_duration_days} days</div>
+                                                    )}
+                                                </Col>
+                                            </Row>
+                                        </Card.Body>
+                                    </Card>
+                                )}
+
+                                {/* ===========================================
+                                TOKEN ANALYSIS
+                                =========================================== */}
+                                {analysisResult.token_analysis && (
+                                    <Card className="mb-3">
+                                        <Card.Header>
+                                            <h6 className="mb-0">Token Analysis</h6>
+                                        </Card.Header>
+                                        <Card.Body>
+                                            <Row>
+                                                {analysisResult.token_analysis.token0 && (
+                                                    <Col md={6}>
+                                                        <h6 className="text-primary">{analysisResult.token_analysis.token0.symbol || 'Token 0'}</h6>
+                                                        <div><strong>Total Supply:</strong> {analysisResult.token_analysis.token0.total_supply?.toLocaleString() || 'N/A'}</div>
+                                                        <div><strong>Circulating:</strong> {analysisResult.token_analysis.token0.circulating_supply?.toLocaleString() || 'N/A'}</div>
+                                                        <div><strong>Holders:</strong> {analysisResult.token_analysis.token0.holder_count?.toLocaleString() || 'N/A'}</div>
+                                                        <div><strong>Top 10 Holders:</strong> {analysisResult.token_analysis.token0.top_10_holder_percentage?.toFixed(1) || 'N/A'}%</div>
+                                                    </Col>
+                                                )}
+                                                {analysisResult.token_analysis.token1 && (
+                                                    <Col md={6}>
+                                                        <h6 className="text-success">{analysisResult.token_analysis.token1.symbol || 'Token 1'}</h6>
+                                                        <div><strong>Type:</strong>
+                                                            {analysisResult.token_analysis.token1.is_stablecoin && <Badge bg="info" className="ms-1">Stablecoin</Badge>}
+                                                            {analysisResult.token_analysis.token1.is_wrapped_native && <Badge bg="success" className="ms-1">Wrapped Native</Badge>}
+                                                        </div>
+                                                        <div><strong>Decimals:</strong> {analysisResult.token_analysis.token1.decimals || 'N/A'}</div>
+                                                        {analysisResult.token_analysis.pair_quality_score && (
+                                                            <div><strong>Pair Quality Score:</strong> {analysisResult.token_analysis.pair_quality_score}/6</div>
+                                                        )}
+                                                    </Col>
+                                                )}
+                                            </Row>
+                                        </Card.Body>
+                                    </Card>
+                                )}
+
+                                {/* ===========================================
+                                TRADING SIGNALS
+                                =========================================== */}
+                                {analysisResult.trading_signals && (
+                                    <Card className="mb-3">
+                                        <Card.Header>
+                                            <h6 className="mb-0">Trading Signals</h6>
+                                        </Card.Header>
+                                        <Card.Body>
+                                            <Row>
+                                                <Col md={6}>
+                                                    <div><strong>Momentum Score:</strong>
+                                                        <span className="ms-1 fw-bold">{analysisResult.trading_signals.momentum_score || 'N/A'}/10</span>
+                                                    </div>
+                                                    <div><strong>Technical Score:</strong>
+                                                        <span className="ms-1 fw-bold">{analysisResult.trading_signals.technical_score || 'N/A'}/10</span>
+                                                    </div>
+                                                    <div><strong>Trend Direction:</strong>
+                                                        <Badge
+                                                            bg={
+                                                                analysisResult.trading_signals.trend_direction === 'bullish' ? 'success' :
+                                                                    analysisResult.trading_signals.trend_direction === 'bearish' ? 'danger' : 'secondary'
+                                                            }
+                                                            className="ms-1"
+                                                        >
+                                                            {analysisResult.trading_signals.trend_direction || 'N/A'}
+                                                        </Badge>
+                                                    </div>
+                                                </Col>
+                                                <Col md={6}>
+                                                    <div><strong>Volume Trend:</strong> {analysisResult.trading_signals.volume_trend || 'N/A'}</div>
+                                                    <div><strong>Social Sentiment:</strong>
+                                                        <Badge
+                                                            bg={
+                                                                analysisResult.trading_signals.social_sentiment === 'positive' ? 'success' :
+                                                                    analysisResult.trading_signals.social_sentiment === 'negative' ? 'danger' : 'secondary'
+                                                            }
+                                                            className="ms-1"
+                                                        >
+                                                            {analysisResult.trading_signals.social_sentiment || 'N/A'}
+                                                        </Badge>
+                                                    </div>
+                                                    <div><strong>Whale Activity:</strong> {analysisResult.trading_signals.whale_activity || 'N/A'}</div>
+                                                </Col>
+                                            </Row>
+                                        </Card.Body>
+                                    </Card>
+                                )}
+
+                                {/* ===========================================
+                                METADATA & WARNINGS
+                                =========================================== */}
+                                {analysisResult.metadata && (
+                                    <Card className="mb-3">
+                                        <Card.Header>
+                                            <h6 className="mb-0">Analysis Metadata</h6>
+                                        </Card.Header>
+                                        <Card.Body>
+                                            {analysisResult.metadata.warnings && analysisResult.metadata.warnings.length > 0 && (
+                                                <div className="mb-3">
+                                                    <strong>Warnings:</strong>
+                                                    {analysisResult.metadata.warnings.map((warning, index) => (
+                                                        <Alert key={index} variant="warning" className="mt-1 mb-1 py-1">
+                                                            <small>{warning}</small>
+                                                        </Alert>
+                                                    ))}
+                                                </div>
+                                            )}
+
+                                            {analysisResult.metadata.confidence_factors && (
+                                                <div className="mb-2">
+                                                    <strong>Confidence Factors:</strong>
+                                                    <ul className="mb-0 mt-1">
+                                                        {analysisResult.metadata.confidence_factors.map((factor, index) => (
+                                                            <li key={index} className="small">{factor}</li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            )}
+
+                                            <div className="small text-muted">
+                                                <strong>Analysis Version:</strong> {analysisResult.metadata.analysis_version || 'N/A'}<br />
+                                                <strong>Next Review:</strong> {analysisResult.metadata.next_review ? new Date(analysisResult.metadata.next_review).toLocaleString() : 'N/A'}
+                                            </div>
+                                        </Card.Body>
+                                    </Card>
+                                )}
+
+                                {/* ===========================================
+                                PAIR INFO
+                                =========================================== */}
+                                {analysisResult.pair_info && (
+                                    <Card className="mb-3 bg-light">
+                                        <Card.Header>
+                                            <h6 className="mb-0">Technical Details</h6>
+                                        </Card.Header>
+                                        <Card.Body>
+                                            <div className="small">
+                                                <div><strong>Address:</strong> <code>{analysisResult.pair_info.address}</code></div>
+                                                <div><strong>Chain:</strong> {analysisResult.pair_info.chain}</div>
+                                                <div><strong>DEX:</strong> {analysisResult.pair_info.dex}</div>
+                                                <div><strong>Source:</strong> {analysisResult.pair_info.source || 'N/A'}</div>
+                                                <div><strong>Analyzed At:</strong> {analysisResult.pair_info.analyzed_at ? new Date(analysisResult.pair_info.analyzed_at).toLocaleString() : 'N/A'}</div>
+                                                {analysisResult.pair_info.trace_id && (
+                                                    <div><strong>Trace ID:</strong> <code>{analysisResult.pair_info.trace_id}</code></div>
+                                                )}
+                                            </div>
+                                        </Card.Body>
+                                    </Card>
                                 )}
                             </div>
                         )
@@ -869,8 +1177,16 @@ return (
             </Modal.Body>
             <Modal.Footer>
                 <Button variant="secondary" onClick={closeModal}>
-                    Close
+                    Close Analysis
                 </Button>
+                {analysisResult && !analysisResult.error && analysisResult.recommendation?.action === 'BUY' && (
+                    <Button variant="success" onClick={() => {
+                        // TODO: Implement execute trade functionality
+                        alert('Trade execution functionality will be implemented next');
+                    }}>
+                        Execute Trade
+                    </Button>
+                )}
             </Modal.Footer>
         </Modal>
         </>

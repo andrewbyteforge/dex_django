@@ -65,21 +65,6 @@ def live_opportunities(request) -> Response:
             "error": f"Failed to get live opportunities: {str(e)}"
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def refresh_opportunities(request) -> Response:
@@ -344,15 +329,6 @@ def _process_dexscreener_pair(pair: Dict[str, Any], trace_id: str) -> Dict[str, 
     except Exception as e:
         logger.error(f"[{trace_id}] Error processing DexScreener pair: {e}")
         return None
-
-
-
-
-
-
-
-
-
 
 def _generate_realistic_mock_data() -> List[Dict[str, Any]]:
     """Generate realistic mock opps (dev)."""
@@ -628,7 +604,6 @@ def opportunity_stats(request) -> Response:
 
 
 
-
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def analyze_opportunity(request) -> Response:
@@ -692,6 +667,17 @@ def _perform_opportunity_analysis(
             pair_address, chain, dex, trace_id
         ),
     }
+
+
+
+
+
+
+
+
+
+
+
 
 
 def _analyze_liquidity(
