@@ -16,8 +16,8 @@ from pydantic import BaseModel
 # Add to path BEFORE importing apps modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Now import after sys.path is set
-from apps.api import copy_mock
+
+
 
 # Install aiohttp if not already available
 try:
@@ -38,6 +38,7 @@ metrics_clients: Set[WebSocket] = set()
 thought_log_active = False
 executor = ThreadPoolExecutor(max_workers=2)
 
+
 # Django setup - FIXED
 def setup_django():
     """Initialize Django ORM for database access."""
@@ -47,19 +48,27 @@ def setup_django():
         if project_root not in sys.path:
             sys.path.insert(0, project_root)
         
-        # Configure Django settings
+        # Configure Django settings BEFORE importing django
         if not os.environ.get('DJANGO_SETTINGS_MODULE'):
             os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.settings')
         
+        # NOW import django after environment is set
         import django
-        if not django.conf.settings.configured:
+        from django.conf import settings
+        
+        # Only setup if not already configured
+        if not settings.configured:
             django.setup()
         
         logger.info("Django ORM initialized successfully")
         return True
     except Exception as e:
         logger.error(f"Failed to initialize Django: {e}")
+        # Add full traceback for debugging
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         return False
+
 
 # Initialize Django before importing apps
 django_initialized = setup_django()

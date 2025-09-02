@@ -8,8 +8,11 @@ from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from backend.app.core.data_seeder import copy_trading_seeder
-from backend.app.copy_trading.copy_trading_coordinator import copy_trading_coordinator
+# from backend.app.core.data_seeder import copy_trading_seeder
+# from backend.app.copy_trading.copy_trading_coordinator import copy_trading_coordinator
+
+# from backend.data_seeder import copy_trading_seeder
+from apps.core.data_seeder import copy_trading_seeder  # Fixed path
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 logger = logging.getLogger("api.admin")
