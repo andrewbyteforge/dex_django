@@ -386,6 +386,34 @@ def calculate_opportunity_score(opp: Dict[str, Any]) -> float:
 # MISSING DISCOVERY ENDPOINT - Fix for Copy Trading Auto Discovery
 # ============================================================================
 
+def ensure_django_setup():
+    """Ensure Django is properly configured before database operations."""
+    try:
+        import django
+        from django.conf import settings
+        
+        if not settings.configured:
+            # Set up Django settings
+            import os
+            
+            # Set the settings module environment variable
+            os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.settings')
+            
+            # Add the dex_django directory to Python path for imports
+            import sys
+            dex_django_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dex_django')
+            if dex_django_path not in sys.path:
+                sys.path.insert(0, dex_django_path)
+            
+            # Configure Django
+            django.setup()
+            logger.info("Django configured successfully for endpoints")
+            
+        return True
+    except Exception as e:
+        logger.error(f"Django setup failed: {e}")
+        return False
+
 # Create a discovery router that can be imported by debug server factory
 discovery_router = APIRouter(prefix="/api/v1")
 
@@ -462,6 +490,267 @@ async def discover_traders_endpoint(request_data: dict = None):
         }
 
 
+@discovery_router.get("/copy/traders")
+async def get_traders_endpoint():
+    """
+    Get list of followed traders from Django database.
+    Returns real persisted trader data.
+    """
+    try:
+        # Ensure Django is configured
+        if not ensure_django_setup():
+            return {
+                "status": "error",
+                "success": False,
+                "error": "Django configuration failed",
+                "data": [],
+                "traders": [],
+                "count": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        
+        # Try to use Django ORM to get real traders
+        traders = []
+        
+        try:
+            # Import Django models
+            from apps.storage.models import FollowedTrader
+            
+            # Query all active followed traders
+            followed_traders = FollowedTrader.objects.filter(
+                status__in=['active', 'paused']
+            ).order_by('-created_at')
+            
+            for trader in followed_traders:
+                trader_data = {
+                    "id": str(trader.id),
+                    "wallet_address": trader.wallet_address,
+                    "trader_name": trader.trader_name or f"Trader_{trader.wallet_address[-4:]}",
+                    "description": trader.description or "",
+                    "chain": trader.chain,
+                    "copy_percentage": float(trader.copy_percentage),
+                    "max_position_usd": float(trader.max_position_usd),
+                    "max_slippage_bps": trader.max_slippage_bps,
+                    "status": trader.status,
+                    "copy_buy_only": trader.copy_buy_only,
+                    "copy_sell_only": trader.copy_sell_only,
+                    "created_at": trader.created_at.isoformat(),
+                    "last_activity_at": trader.last_activity_at.isoformat() if trader.last_activity_at else None,
+                    "total_pnl_usd": str(trader.total_pnl_usd or 0),
+                    "win_rate_pct": float(trader.win_rate_pct or 0),
+                    "total_trades": trader.total_trades or 0,
+                    "avg_trade_size_usd": float(trader.avg_trade_size_usd or 0),
+                    "quality_score": trader.quality_score or 75,
+                    "is_following": True
+                }
+                traders.append(trader_data)
+                
+            logger.info(f"Retrieved {len(traders)} real traders from database")
+            
+        except Exception as db_error:
+            logger.error(f"Database query failed: {db_error}")
+            # If database fails, return empty list
+            traders = []
+        
+        return {
+            "status": "ok",
+            "success": True,
+            "data": traders,
+            "traders": traders,
+            "count": len(traders),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Get traders endpoint error: {e}")
+        return {
+            "status": "error",
+            "success": False,
+            "error": str(e),
+            "data": [],
+            "traders": [],
+            "count": 0,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+
+@discovery_router.post("/copy/traders")
+async def add_trader_endpoint(request_data: dict = None):
+    """
+    Add a trader to the copy trading system.
+    This endpoint is called when users click "Add Trader" in the frontend.
+    """
+    try:
+        # Ensure Django is configured
+        if not ensure_django_setup():
+            return {
+                "status": "error",
+                "success": False,
+                "error": "Django configuration failed",
+                "message": "Django configuration failed"
+            }
+        
+        # Parse request data - frontend sends wallet_address, not address
+        body = request_data or {}
+        trader_address = body.get('wallet_address') or body.get('address', '')
+        trader_name = body.get('trader_name', '')
+        
+        if not trader_address:
+            return {
+                "status": "error",
+                "success": False,
+                "error": "Trader address is required",
+                "message": "Trader address is required"
+            }
+        
+        if not trader_name:
+            return {
+                "status": "error", 
+                "success": False,
+                "error": "Trader name is required",
+                "message": "Trader name is required"
+            }
+        logger.info(f"Adding trader: {trader_address} (name: {trader_name})")
+        
+        # Save to real Django database
+        try:
+            from apps.storage.models import FollowedTrader
+            from decimal import Decimal
+            
+            # Validate copy mode logic
+            copy_buy_only = bool(body.get('copy_buy_only', False))
+            copy_sell_only = bool(body.get('copy_sell_only', False))
+            
+            # Ensure both can't be true (invalid state)
+            if copy_buy_only and copy_sell_only:
+                copy_buy_only = False
+                copy_sell_only = False
+            
+            # Create new FollowedTrader in database
+            trader = FollowedTrader.objects.create(
+                wallet_address=trader_address,
+                trader_name=trader_name,
+                description=body.get('description', ''),
+                chain=body.get('chain', 'ethereum'),
+                copy_percentage=Decimal(str(body.get('copy_percentage', 5.0))),
+                max_position_usd=Decimal(str(body.get('max_position_usd', 1000.0))),
+                max_slippage_bps=int(body.get('max_slippage_bps', 300)),
+                copy_buy_only=copy_buy_only,
+                copy_sell_only=copy_sell_only,
+                status='active'
+            )
+            
+            # Return the actual saved data
+            trader_data = {
+                "id": str(trader.id),
+                "wallet_address": trader.wallet_address,
+                "trader_name": trader.trader_name,
+                "description": trader.description,
+                "chain": trader.chain,
+                "copy_percentage": float(trader.copy_percentage),
+                "max_position_usd": float(trader.max_position_usd),
+                "max_slippage_bps": trader.max_slippage_bps,
+                "copy_buy_only": trader.copy_buy_only,
+                "copy_sell_only": trader.copy_sell_only,
+                "status": trader.status,
+                "created_at": trader.created_at.isoformat(),
+                "last_activity_at": trader.last_activity_at.isoformat() if trader.last_activity_at else None,
+                "total_pnl_usd": str(trader.total_pnl_usd or 0),
+                "win_rate_pct": float(trader.win_rate_pct or 0),
+                "total_trades": trader.total_trades or 0,
+                "avg_trade_size_usd": float(trader.avg_trade_size_usd or 0),
+                "quality_score": trader.quality_score or 75,
+                "is_following": True
+            }
+            
+            logger.info(f"Successfully saved trader {trader_name} to database with ID {trader.id}")
+            
+            return {
+                "status": "ok",
+                "success": True,
+                "message": f"Trader {trader_name} ({trader_address[:10]}...) added successfully",
+                "trader": trader_data,
+                "data": trader_data,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+        except Exception as db_error:
+            logger.error(f"Database save failed: {db_error}")
+            return {
+                "status": "error",
+                "success": False,
+                "error": f"Database error: {str(db_error)}",
+                "message": "Failed to save trader to database",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        
+    except Exception as e:
+        logger.error(f"Add trader endpoint error: {e}")
+        return {
+            "status": "error",
+            "success": False,
+            "error": str(e),
+            "message": f"Failed to add trader: {str(e)}",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+
+@discovery_router.delete("/copy/traders/{trader_id}")
+async def remove_trader_endpoint(trader_id: str):
+    """
+    Remove a followed trader from the database.
+    This endpoint is called when users click the delete button.
+    """
+    try:
+        # Ensure Django is configured
+        if not ensure_django_setup():
+            return {
+                "status": "error",
+                "success": False,
+                "error": "Django configuration failed",
+                "message": "Failed to delete trader: Django configuration failed",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        
+        from apps.storage.models import FollowedTrader
+        
+        # Find and delete the trader
+        try:
+            trader = FollowedTrader.objects.get(id=trader_id)
+            trader_name = trader.trader_name
+            trader_address = trader.wallet_address
+            
+            trader.delete()
+            
+            logger.info(f"Successfully deleted trader {trader_name} ({trader_address})")
+            
+            return {
+                "status": "ok",
+                "success": True,
+                "message": f"Trader {trader_name} removed successfully",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+        except FollowedTrader.DoesNotExist:
+            return {
+                "status": "error",
+                "success": False,
+                "error": "Trader not found",
+                "message": "Trader not found in database",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+    except Exception as e:
+        logger.error(f"Delete trader endpoint error: {e}")
+        return {
+            "status": "error",
+            "success": False,
+            "error": str(e),
+            "message": f"Failed to delete trader: {str(e)}",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+
 def get_app():
     """
     Factory function for uvicorn import string.
@@ -477,9 +766,14 @@ def get_app():
     # Import here so path/logging is configured first
     from dex_django.apps.core.debug_server import create_configured_debug_app
 
-    # If your factory supports DI, you could pass fetch_real_opportunities here.
-    # e.g., create_configured_debug_app(fetch_real_opportunities=fetch_real_opportunities)
-    return create_configured_debug_app()
+    # Create the app from the factory
+    app = create_configured_debug_app()
+    
+    # Add our discovery router to fix the missing endpoint
+    app.include_router(discovery_router, tags=["discovery"])
+    logger.info("Discovery router added to debug app")
+    
+    return app
 
 
 def main() -> None:
