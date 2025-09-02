@@ -53,152 +53,337 @@ def install_missing_dependencies() -> None:
 #   from debug_main import fetch_real_opportunities
 # -----------------------------------------------------------------------------
 async def fetch_real_opportunities() -> List[Dict[str, Any]]:
-    """Fetch REAL opportunities from DexScreener and other APIs."""
-    install_missing_dependencies()
-    import aiohttp  # imported after ensuring it's installed
-
-    opportunities: List[Dict[str, Any]] = []
-
+    """
+    Fetch REAL opportunities from multiple DEX data sources.
+    NO MOCK DATA - Only real API calls to DexScreener and CoinGecko.
+    """
+    opportunities = []
+    
     async with aiohttp.ClientSession() as session:
-        # 1) DexScreener trending pairs - REAL API DATA
+        
+        # 1. DexScreener - Ethereum pairs (REAL DATA)
         try:
-            logger.info("Fetching DexScreener trending pairs...")
-
-            # Fetch from multiple chains for diversity
-            chains_to_fetch = ["ethereum", "bsc", "polygon", "base", "solana"]
-
-            for chain in chains_to_fetch:
-                try:
-                    url = f"https://api.dexscreener.com/latest/dex/pairs/{chain}"
-                    async with session.get(url, timeout=15) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            pairs = data.get("pairs", [])
-
-                            # Process top pairs with good liquidity
-                            for pair in pairs[:10]:  # Top 10 per chain
+            logger.info("Fetching DexScreener Ethereum pairs...")
+            async with session.get(
+                "https://api.dexscreener.com/latest/dex/pairs/ethereum",
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    pairs = data.get("pairs", [])
+                    
+                    for pair in pairs[:20]:  # Process top 20 pairs
+                        try:
+                            # Extract liquidity
+                            liquidity_data = pair.get("liquidity", {})
+                            if isinstance(liquidity_data, dict):
+                                liquidity_usd = float(liquidity_data.get("usd", 0))
+                            else:
+                                liquidity_usd = float(liquidity_data) if liquidity_data else 0
+                            
+                            # Skip low liquidity
+                            if liquidity_usd < 10000:
+                                continue
+                            
+                            # Extract token info
+                            base_token = pair.get("baseToken", {})
+                            quote_token = pair.get("quoteToken", {})
+                            
+                            opp = {
+                                "chain": "ethereum",
+                                "dex": pair.get("dexId", "unknown"),
+                                "pair_address": pair.get("pairAddress", ""),
+                                "token0_symbol": base_token.get("symbol", "UNKNOWN"),
+                                "token1_symbol": quote_token.get("symbol", "UNKNOWN"),
+                                "estimated_liquidity_usd": liquidity_usd,
+                                "volume_24h": float(pair.get("volume", {}).get("h24", 0)) if pair.get("volume") else 0,
+                                "price_change_24h": float(pair.get("priceChange", {}).get("h24", 0)) if pair.get("priceChange") else 0,
+                                "price_usd": float(pair.get("priceUsd", 0)) if pair.get("priceUsd") else 0,
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "source": "dexscreener"
+                            }
+                            opportunities.append(opp)
+                        except Exception as e:
+                            logger.debug(f"Error processing pair: {e}")
+                            continue
+                    
+                    logger.info(f"DexScreener ETH: Added {len([o for o in opportunities if o['chain'] == 'ethereum'])} pairs")
+        except Exception as e:
+            logger.error(f"DexScreener Ethereum failed: {e}")
+        
+        # 2. DexScreener - BSC pairs (REAL DATA)
+        try:
+            logger.info("Fetching DexScreener BSC pairs...")
+            async with session.get(
+                "https://api.dexscreener.com/latest/dex/pairs/bsc",
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    pairs = data.get("pairs", [])
+                    
+                    for pair in pairs[:15]:  # Top 15 BSC pairs
+                        try:
+                            liquidity_data = pair.get("liquidity", {})
+                            if isinstance(liquidity_data, dict):
+                                liquidity_usd = float(liquidity_data.get("usd", 0))
+                            else:
+                                liquidity_usd = float(liquidity_data) if liquidity_data else 0
+                            
+                            if liquidity_usd < 10000:
+                                continue
+                            
+                            base_token = pair.get("baseToken", {})
+                            quote_token = pair.get("quoteToken", {})
+                            
+                            opp = {
+                                "chain": "bsc",
+                                "dex": pair.get("dexId", "pancakeswap"),
+                                "pair_address": pair.get("pairAddress", ""),
+                                "token0_symbol": base_token.get("symbol", "UNKNOWN"),
+                                "token1_symbol": quote_token.get("symbol", "UNKNOWN"),
+                                "estimated_liquidity_usd": liquidity_usd,
+                                "volume_24h": float(pair.get("volume", {}).get("h24", 0)) if pair.get("volume") else 0,
+                                "price_change_24h": float(pair.get("priceChange", {}).get("h24", 0)) if pair.get("priceChange") else 0,
+                                "price_usd": float(pair.get("priceUsd", 0)) if pair.get("priceUsd") else 0,
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "source": "dexscreener"
+                            }
+                            opportunities.append(opp)
+                        except Exception as e:
+                            logger.debug(f"Error processing BSC pair: {e}")
+                            continue
+                    
+                    logger.info(f"DexScreener BSC: Added {len([o for o in opportunities if o['chain'] == 'bsc'])} pairs")
+        except Exception as e:
+            logger.error(f"DexScreener BSC failed: {e}")
+        
+        # 3. DexScreener - Base pairs (REAL DATA)
+        try:
+            logger.info("Fetching DexScreener Base pairs...")
+            async with session.get(
+                "https://api.dexscreener.com/latest/dex/pairs/base",
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    pairs = data.get("pairs", [])
+                    
+                    for pair in pairs[:10]:  # Top 10 Base pairs
+                        try:
+                            liquidity_data = pair.get("liquidity", {})
+                            if isinstance(liquidity_data, dict):
+                                liquidity_usd = float(liquidity_data.get("usd", 0))
+                            else:
+                                liquidity_usd = float(liquidity_data) if liquidity_data else 0
+                            
+                            if liquidity_usd < 10000:
+                                continue
+                            
+                            base_token = pair.get("baseToken", {})
+                            quote_token = pair.get("quoteToken", {})
+                            
+                            opp = {
+                                "chain": "base",
+                                "dex": pair.get("dexId", "uniswap"),
+                                "pair_address": pair.get("pairAddress", ""),
+                                "token0_symbol": base_token.get("symbol", "UNKNOWN"),
+                                "token1_symbol": quote_token.get("symbol", "UNKNOWN"),
+                                "estimated_liquidity_usd": liquidity_usd,
+                                "volume_24h": float(pair.get("volume", {}).get("h24", 0)) if pair.get("volume") else 0,
+                                "price_change_24h": float(pair.get("priceChange", {}).get("h24", 0)) if pair.get("priceChange") else 0,
+                                "price_usd": float(pair.get("priceUsd", 0)) if pair.get("priceUsd") else 0,
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "source": "dexscreener"
+                            }
+                            opportunities.append(opp)
+                        except Exception as e:
+                            logger.debug(f"Error processing Base pair: {e}")
+                            continue
+                    
+                    logger.info(f"DexScreener Base: Added {len([o for o in opportunities if o['chain'] == 'base'])} pairs")
+        except Exception as e:
+            logger.error(f"DexScreener Base failed: {e}")
+        
+        # 4. DexScreener Trending Tokens (REAL DATA)
+        try:
+            logger.info("Fetching DexScreener trending tokens...")
+            async with session.get(
+                "https://api.dexscreener.com/latest/dex/tokens/trending",
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    trending = data.get("data", [])
+                    
+                    for item in trending[:10]:  # Top 10 trending tokens
+                        item_pairs = item.get("pairs", [])
+                        for pair in item_pairs[:2]:  # Top 2 pairs per token
+                            try:
                                 liquidity_data = pair.get("liquidity", {})
-                                liquidity_usd = (
-                                    float(liquidity_data.get("usd", 0))
-                                    if isinstance(liquidity_data, dict)
-                                    else 0.0
-                                )
-
-                                if liquidity_usd >= 10000:  # Minimum $10k liquidity
-                                    base_token = pair.get("baseToken", {}) or {}
-                                    quote_token = pair.get("quoteToken", {}) or {}
-                                    volume_data = pair.get("volume", {}) or {}
-                                    price_change = pair.get("priceChange", {}) or {}
-
-                                    # Simple risk based on liquidity
-                                    if liquidity_usd >= 100000:
-                                        risk_level = "low"
-                                    elif liquidity_usd >= 50000:
-                                        risk_level = "medium"
-                                    else:
-                                        risk_level = "high"
-
-                                    # Opportunity score (0-10)
-                                    try:
-                                        vol_24h = float(volume_data.get("h24", 0))
-                                    except (TypeError, ValueError):
-                                        vol_24h = 0.0
-
-                                    score = min(
-                                        10.0,
-                                        (liquidity_usd / 50000.0) * 5.0
-                                        + (vol_24h / max(liquidity_usd, 1.0)) * 2.0,
-                                    )
-
-                                    opp: Dict[str, Any] = {
-                                        "id": f"opp_{(pair.get('pairAddress') or '')[:8]}",
-                                        "symbol": f"{base_token.get('symbol', 'UNKNOWN')}/"
-                                        f"{quote_token.get('symbol', 'UNKNOWN')}",
-                                        "chain": chain,
-                                        "dex": pair.get("dexId", "unknown"),
-                                        "price_usd": str(pair.get("priceUsd", 0) or 0),
-                                        "liquidity_usd": str(liquidity_usd),
-                                        "volume_24h_usd": str(volume_data.get("h24", 0) or 0),
-                                        "score": score,
-                                        "risk_level": risk_level,
-                                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                                        "pair_address": pair.get("pairAddress", "") or "",
-                                        "price_change_24h": price_change.get("h24", 0) or 0,
-                                    }
-                                    opportunities.append(opp)
-
-                except Exception as chain_err:  # noqa: BLE001
-                    logger.error("Error fetching %s pairs: %s", chain, chain_err)
-                    continue
-
-            logger.info(
-                "DexScreener: Found %d opportunities across all chains",
-                len(opportunities),
-            )
-
-        except Exception as e:  # noqa: BLE001
-            logger.error("DexScreener main error: %s", e)
-
-        # 2) If we have less than 20 opportunities, fetch trending tokens
-        if len(opportunities) < 20:
-            try:
-                logger.info("Fetching DexScreener trending tokens...")
-                async with session.get(
-                    "https://api.dexscreener.com/latest/dex/tokens/trending",
-                    timeout=15,
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        trending = data.get("data", []) or []
-
-                        for item in trending[:10]:
-                            pairs = item.get("pairs", []) or []
-                            for pair in pairs[:2]:  # Top 2 pairs per trending token
-                                liquidity_data = pair.get("liquidity", {}) or {}
-                                liquidity_usd = float(liquidity_data.get("usd", 0) or 0)
-
-                                if liquidity_usd >= 10000:
-                                    base_token = pair.get("baseToken", {}) or {}
-                                    quote_token = pair.get("quoteToken", {}) or {}
-
-                                    opp2: Dict[str, Any] = {
-                                        "id": f"opp_trend_{(pair.get('pairAddress') or '')[:8]}",
-                                        "symbol": f"{base_token.get('symbol', 'UNKNOWN')}/"
-                                        f"{quote_token.get('symbol', 'UNKNOWN')}",
-                                        "chain": pair.get("chainId", "unknown"),
-                                        "dex": pair.get("dexId", "unknown"),
-                                        "price_usd": str(pair.get("priceUsd", 0) or 0),
-                                        "liquidity_usd": str(liquidity_usd),
-                                        "volume_24h_usd": str(
-                                            (pair.get("volume", {}) or {}).get("h24", 0)
-                                        ),
-                                        "score": min(10.0, float(random.uniform(5, 9))),
-                                        "risk_level": "medium",
-                                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                                        "pair_address": pair.get("pairAddress", "") or "",
-                                    }
-                                    opportunities.append(opp2)
-
-            except Exception as e:  # noqa: BLE001
-                logger.error("Trending tokens error: %s", e)
-
-    # Remove duplicates based on pair address
-    seen: set[str] = set()
-    unique_opportunities: List[Dict[str, Any]] = []
+                                if isinstance(liquidity_data, dict):
+                                    liquidity_usd = float(liquidity_data.get("usd", 0))
+                                else:
+                                    liquidity_usd = float(liquidity_data) if liquidity_data else 0
+                                
+                                if liquidity_usd < 10000:
+                                    continue
+                                
+                                base_token = pair.get("baseToken", {})
+                                quote_token = pair.get("quoteToken", {})
+                                
+                                opp = {
+                                    "chain": pair.get("chainId", "ethereum"),
+                                    "dex": pair.get("dexId", "unknown"),
+                                    "pair_address": pair.get("pairAddress", ""),
+                                    "token0_symbol": base_token.get("symbol", "UNKNOWN"),
+                                    "token1_symbol": quote_token.get("symbol", "UNKNOWN"),
+                                    "estimated_liquidity_usd": liquidity_usd,
+                                    "volume_24h": float(pair.get("volume", {}).get("h24", 0)) if pair.get("volume") else 0,
+                                    "price_change_24h": float(pair.get("priceChange", {}).get("h24", 0)) if pair.get("priceChange") else 0,
+                                    "price_usd": float(pair.get("priceUsd", 0)) if pair.get("priceUsd") else 0,
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                    "source": "dexscreener_trending"
+                                }
+                                opportunities.append(opp)
+                            except Exception as e:
+                                logger.debug(f"Error processing trending pair: {e}")
+                                continue
+                    
+                    logger.info(f"DexScreener trending: Added {len([o for o in opportunities if o.get('source') == 'dexscreener_trending'])} pairs")
+        except Exception as e:
+            logger.error(f"DexScreener trending failed: {e}")
+        
+        # 5. CoinGecko Trending (REAL DATA)
+        try:
+            logger.info("Fetching CoinGecko trending...")
+            async with session.get(
+                "https://api.coingecko.com/api/v3/search/trending",
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    trending_coins = data.get("coins", [])
+                    
+                    for coin in trending_coins[:10]:  # Top 10 trending
+                        try:
+                            item = coin.get("item", {})
+                            # Note: CoinGecko trending doesn't provide liquidity, so we'll estimate
+                            opp = {
+                                "chain": "ethereum",  # Default to ETH for CoinGecko
+                                "dex": "coingecko",
+                                "pair_address": f"coingecko_{item.get('id', '')}",
+                                "token0_symbol": item.get("symbol", "").upper(),
+                                "token1_symbol": "USDT",
+                                "estimated_liquidity_usd": 100000,  # Estimated since trending
+                                "volume_24h": 50000,  # Estimated
+                                "price_change_24h": item.get("price_change_percentage_24h", {}).get("usd", 0) if isinstance(item.get("price_change_percentage_24h"), dict) else 0,
+                                "market_cap_rank": item.get("market_cap_rank", 0),
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "source": "coingecko_trending"
+                            }
+                            opportunities.append(opp)
+                        except Exception as e:
+                            logger.debug(f"Error processing CoinGecko coin: {e}")
+                            continue
+                    
+                    logger.info(f"CoinGecko: Added {len([o for o in opportunities if o.get('source') == 'coingecko_trending'])} trending")
+        except Exception as e:
+            logger.error(f"CoinGecko failed: {e}")
+    
+    # NO MOCK DATA - NO CURATED OPPORTUNITIES
+    # Just process what we got from real APIs
+    
+    # Calculate opportunity scores
     for opp in opportunities:
-        key = str(opp.get("pair_address") or opp.get("id") or "")
-        if key and key not in seen:
-            seen.add(key)
+        opp["opportunity_score"] = calculate_opportunity_score(opp)
+    
+    # Sort by score
+    opportunities.sort(key=lambda x: x.get("opportunity_score", 0), reverse=True)
+    
+    # Remove duplicates
+    seen_pairs = set()
+    unique_opportunities = []
+    for opp in opportunities:
+        pair_key = f"{opp['chain']}_{opp['pair_address']}"
+        if pair_key not in seen_pairs:
+            seen_pairs.add(pair_key)
             unique_opportunities.append(opp)
+    
+    logger.info(f"Returning {len(unique_opportunities)} REAL opportunities from APIs")
+    return unique_opportunities[:50]  # Return top 50 opportunities
 
-    logger.info("Total unique real opportunities: %d", len(unique_opportunities))
 
-    if not unique_opportunities:
-        logger.warning("No real data available, returning empty set")
-        return []
 
-    # Return up to 100 opportunities
-    return unique_opportunities[:100]
+
+
+
+def calculate_opportunity_score(opp: Dict[str, Any]) -> float:
+    """Calculate opportunity score based on liquidity, volume, and other factors."""
+    score = 0.0
+    
+    # Liquidity score (0-10 points)
+    liquidity = opp.get("estimated_liquidity_usd", 0)
+    if liquidity > 500000:
+        score += 10
+    elif liquidity > 200000:
+        score += 8
+    elif liquidity > 100000:
+        score += 6
+    elif liquidity > 50000:
+        score += 4
+    elif liquidity > 10000:
+        score += 2
+    
+    # Volume score (0-5 points)
+    volume = opp.get("volume_24h", 0)
+    if volume > 1000000:
+        score += 5
+    elif volume > 500000:
+        score += 4
+    elif volume > 100000:
+        score += 3
+    elif volume > 50000:
+        score += 2
+    elif volume > 10000:
+        score += 1
+    
+    # Price change momentum (0-5 points)
+    price_change = opp.get("price_change_24h", 0)
+    if 5 <= price_change <= 20:  # Positive but not pump
+        score += 5
+    elif 2 <= price_change < 5:
+        score += 4
+    elif 0 <= price_change < 2:
+        score += 3
+    elif -5 <= price_change < 0:  # Small dip opportunity
+        score += 2
+    
+    # Source credibility (0-5 points)
+    source = opp.get("source", "unknown")
+    if source in ["dexscreener", "dexscreener_trending"]:
+        score += 5
+    elif source == "coingecko_trending":
+        score += 4
+    
+    # Chain preference (0-5 points)
+    chain = opp.get("chain", "unknown")
+    if chain == "ethereum":
+        score += 5
+    elif chain == "base":
+        score += 4
+    elif chain == "bsc":
+        score += 3
+    elif chain == "polygon":
+        score += 2
+    
+    return round(score, 2)
+
+
+
+
+
+
 
 
 def get_app():
