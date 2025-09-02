@@ -6,7 +6,11 @@ import {
     Spinner, ProgressBar, Tabs, Tab, InputGroup, Dropdown,
     OverlayTrigger, Tooltip
 } from 'react-bootstrap';
-import { WalletDiscoveryPanel } from './WalletDiscoveryPanel.jsx';
+// Comment out the WalletDiscoveryPanel import temporarily
+// import { WalletDiscoveryPanel } from './WalletDiscoveryPanel.jsx';
+
+// API Configuration - Fixed to point to backend
+const API_BASE = 'http://127.0.0.1:8000';
 
 export function CopyTradingTab() {
     // State management
@@ -22,7 +26,7 @@ export function CopyTradingTab() {
     const [showDetailsModal, setShowDetailsModal] = useState(false);
     const [selectedTrader, setSelectedTrader] = useState(null);
 
-    // Tab state - ADD THIS
+    // Tab state
     const [activeTabKey, setActiveTabKey] = useState('traders');
 
     // Form state for adding/editing traders
@@ -53,24 +57,24 @@ export function CopyTradingTab() {
         try {
             setLoading(true);
 
-            // Load followed traders - Use mock endpoint temporarily
+            // Load followed traders - Fixed API call
             try {
-                const tradersResponse = await fetch('/api/v1/copy/traders');
+                const tradersResponse = await fetch(`${API_BASE}/api/v1/copy/traders`);
                 if (tradersResponse.ok) {
                     const tradersData = await tradersResponse.json();
                     setFollowedTraders(tradersData.data || []);
                 } else {
                     console.warn('Copy trading endpoints not available, using mock data');
-                    setFollowedTraders([]); // Empty array for now
+                    setFollowedTraders([]);
                 }
             } catch (err) {
                 console.warn('Traders API not available:', err);
                 setFollowedTraders([]);
             }
 
-            // Load recent copy trades
+            // Load recent copy trades - Fixed API call
             try {
-                const tradesResponse = await fetch('/api/v1/copy/trades');
+                const tradesResponse = await fetch(`${API_BASE}/api/v1/copy/trades`);
                 if (tradesResponse.ok) {
                     const tradesData = await tradesResponse.json();
                     setRecentTrades(tradesData.data || []);
@@ -82,9 +86,9 @@ export function CopyTradingTab() {
                 setRecentTrades([]);
             }
 
-            // Load system status
+            // Load system status - Fixed API call
             try {
-                const statusResponse = await fetch('/api/v1/copy/status');
+                const statusResponse = await fetch(`${API_BASE}/api/v1/copy/status`);
                 if (statusResponse.ok) {
                     const statusData = await statusResponse.json();
                     setSystemStatus(statusData);
@@ -138,7 +142,8 @@ export function CopyTradingTab() {
                 return;
             }
 
-            const response = await fetch('/api/v1/copy/traders', {
+            // Fixed API call with correct base URL
+            const response = await fetch(`${API_BASE}/api/v1/copy/traders`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -191,7 +196,8 @@ export function CopyTradingTab() {
         e.preventDefault();
 
         try {
-            const response = await fetch(`/api/v1/copy/traders/${selectedTrader.id}`, {
+            // Fixed API call with correct base URL
+            const response = await fetch(`${API_BASE}/api/v1/copy/traders/${selectedTrader.id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formData)
@@ -217,7 +223,8 @@ export function CopyTradingTab() {
         }
 
         try {
-            const response = await fetch(`/api/v1/copy/traders/${trader.id}`, {
+            // Fixed API call with correct base URL
+            const response = await fetch(`${API_BASE}/api/v1/copy/traders/${trader.id}`, {
                 method: 'DELETE'
             });
 
@@ -234,7 +241,8 @@ export function CopyTradingTab() {
 
     const handleToggleTraderStatus = async (trader, newStatus) => {
         try {
-            const response = await fetch(`/api/v1/copy/traders/${trader.id}`, {
+            // Fixed API call with correct base URL
+            const response = await fetch(`${API_BASE}/api/v1/copy/traders/${trader.id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ status: newStatus })
@@ -261,7 +269,7 @@ export function CopyTradingTab() {
             copy_percentage: 3.0,
             fixed_amount_usd: 100,
             max_position_usd: 1000,
-            min_trade_value_usd: 50,  // Fixed: was causing the 41-51 issue
+            min_trade_value_usd: 50,
             max_slippage_bps: 300,
             allowed_chains: ['ethereum'],
             copy_buy_only: false,
@@ -372,7 +380,7 @@ export function CopyTradingTab() {
                                     </Col>
                                     <Col md={3}>
                                         <div className="text-center">
-                                            <div className="h4 text-info">{systemStatus.win_rate_pct.toFixed(1)}%</div>
+                                            <div className="h4 text-info">{(systemStatus.win_rate_pct || 0).toFixed(1)}%</div>
                                             <div className="text-muted small">Win Rate</div>
                                         </div>
                                     </Col>
@@ -462,10 +470,10 @@ export function CopyTradingTab() {
                                                     </td>
                                                     <td>
                                                         <div className="small">
-                                                            <div>📊 {trader.total_copies} trades</div>
-                                                            <div>📈 {trader.win_rate.toFixed(1)}% win rate</div>
-                                                            <div className={parseFloat(trader.total_pnl_usd) >= 0 ? 'text-success' : 'text-danger'}>
-                                                                💰 ${parseFloat(trader.total_pnl_usd).toFixed(2)}
+                                                            <div>📊 {trader.total_copies || 0} trades</div>
+                                                            <div>📈 {(trader.win_rate || 0).toFixed(1)}% win rate</div>
+                                                            <div className={parseFloat(trader.total_pnl_usd || 0) >= 0 ? 'text-success' : 'text-danger'}>
+                                                                💰 ${parseFloat(trader.total_pnl_usd || 0).toFixed(2)}
                                                             </div>
                                                         </div>
                                                     </td>
@@ -571,9 +579,16 @@ export function CopyTradingTab() {
                     </Card>
                 </Tab>
 
-                {/* Wallet Discovery Tab - NEW */}
+                {/* Wallet Discovery Tab - Temporarily disabled */}
                 <Tab eventKey="discovery" title="🔍 Auto Discovery">
-                    <WalletDiscoveryPanel />
+                    <Card>
+                        <Card.Body>
+                            <div className="text-center py-4 text-muted">
+                                <div className="h4">🔍</div>
+                                <p>Wallet discovery feature coming soon...</p>
+                            </div>
+                        </Card.Body>
+                    </Card>
                 </Tab>
 
                 {/* Recent Copy Trades Tab */}

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     
     # API
     API_V1_PREFIX: str = Field(default="/api/v1")
+    # CORS_ORIGINS should only list frontend URLs, not backend APIs
     CORS_ORIGINS: List[str] = Field(default=["http://localhost:5173", "http://127.0.0.1:5173"])
     
     # Trading

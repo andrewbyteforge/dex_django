@@ -108,11 +108,15 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "apps.api.exceptions.exception_handler",
 }
 
-# CORS for Vite dev server
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
+    "http://localhost:5173",    # Vite dev server (frontend only)
+    "http://127.0.0.1:5173",   # Frontend only
 ]
+
+CORS_ALLOW_ALL_ORIGINS = False  # Keep security tight
+
+# Ensure all API calls go to Django backend
+CORS_ALLOW_ALL_ORIGINS = False  # Keep security tight
 # allow our custom header
 CORS_ALLOW_HEADERS = list({
     "accept",
