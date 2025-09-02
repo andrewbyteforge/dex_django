@@ -21,7 +21,7 @@ export function LiveOpportunitiesCard() {
         minLiquidity: 0,
         maxLiquidity: 1000000,
         selectedChains: new Set(['ethereum', 'bsc', 'base', 'polygon', 'solana']),
-        selectedDexes: new Set(['quickswap', 'jupiter', '1inch', 'uniswap_v3', 'pancakeswap'])
+        selectedDexes: new Set(['quickswap', 'jupiter', '1inch', 'uniswap_v3', 'pancakeswap', 'osmosis', 'sushiswap', 'uniswap_v2', 'unknown', 'coingecko', 'dexscreener'])
     });
 
     // Pagination states - controls table display
@@ -42,7 +42,7 @@ export function LiveOpportunitiesCard() {
         data: stats,
         refresh: refreshStats
     } = useDjangoData('/api/v1/opportunities/stats', {});
-
+    console.log("Full API response:", opportunitiesData);
     // Extract raw opportunities from API response
     const rawOpportunities = opportunitiesData?.opportunities || [];
 
@@ -62,8 +62,8 @@ export function LiveOpportunitiesCard() {
     const filteredOpportunities = useMemo(() => {
         const filtered = rawOpportunities.filter(opp => {
             // Backend already returns correct field names - use them directly
-            const score = opp.score || 0;
-            const liquidity = opp.liquidity_usd || 0;
+            const score = opp.opportunity_score || opp.score || 0;
+            const liquidity = opp.estimated_liquidity_usd || opp.liquidity_usd || 0;
             const chain = opp.chain || 'unknown';
             const dex = opp.dex || 'unknown';
 
@@ -185,7 +185,7 @@ export function LiveOpportunitiesCard() {
             minLiquidity: 0,
             maxLiquidity: 1000000,
             selectedChains: new Set(['ethereum', 'bsc', 'base', 'polygon', 'solana']),
-            selectedDexes: new Set(['quickswap', 'jupiter', '1inch', 'uniswap_v3', 'pancakeswap'])
+            selectedDexes: new Set(['quickswap', 'jupiter', '1inch', 'uniswap_v3', 'pancakeswap', 'osmosis', 'sushiswap', 'uniswap_v2', 'unknown', 'coingecko', 'dexscreener'])
         });
         setCurrentPage(1);
     };
@@ -643,9 +643,9 @@ export function LiveOpportunitiesCard() {
                                         const address = opp.address || opp.id || '';
                                         const chain = opp.chain || 'unknown';
                                         const dex = opp.dex || 'unknown';
-                                        const liquidity = opp.liquidity_usd || 0;
+                                        const liquidity = opp.estimated_liquidity_usd || opp.liquidity_usd || 0;
                                         const volume24h = opp.volume_24h_usd || 0;
-                                        const score = opp.score || 0;
+                                        const score = opp.opportunity_score || opp.score || 0;
                                         const riskLevel = opp.risk_level || 'unknown';
                                         const timestamp = opp.timestamp || opp.created_at;
 
