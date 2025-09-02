@@ -297,18 +297,6 @@ def calculate_simple_risk_level(liquidity_usd: float, volume_24h: float, price_c
     else:
         return "high"
 
-
-
-
-
-
-
-
-
-
-
-
-
 import aiohttp
 from datetime import datetime, timezone
 from typing import Dict, Any, List
@@ -316,6 +304,7 @@ from typing import Dict, Any, List
 # APP: dex_django
 # FILE: dex_django/apps/api/debug_routers.py
 # FUNCTION: Replace the existing fetch_real_opportunities function with this improved version
+
 
 async def fetch_real_opportunities() -> List[Dict[str, Any]]:
     """Fetch REAL opportunities from DexScreener API for multiple chains."""
@@ -455,20 +444,6 @@ async def fetch_real_opportunities() -> List[Dict[str, Any]]:
     logger.info(f"Total opportunities fetched: {len(opportunities)}")
     logger.info(f"Chains represented: {set(o['chain'] for o in opportunities)}")
     return opportunities
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def calculate_real_stats(opportunities: List[Dict[str, Any]]) -> Dict[str, Any]:

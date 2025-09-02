@@ -380,12 +380,6 @@ def calculate_opportunity_score(opp: Dict[str, Any]) -> float:
     return round(score, 2)
 
 
-
-
-
-
-
-
 def get_app():
     """
     Factory function for uvicorn import string.
