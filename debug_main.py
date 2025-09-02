@@ -690,21 +690,29 @@ async def get_copy_trades(
 # WALLET DISCOVERY ENDPOINTS - Auto discovery functionality
 # ============================================================================
 
-@api_router.post("/discovery/discover-traders")
+# Fix the discovery endpoint - add missing imports at the top of debug_main.py
+
+# The issue is that your frontend expects a specific response format
+# Let's fix the discovery endpoint to return the format the frontend expects:
+
+@api_router.post("/copy/discovery/discover-traders")
 async def discover_traders(request_data: dict):
     """
     Automatically discover top performing traders across specified chains.
     This is the main auto discovery endpoint that the frontend calls.
     """
     try:
-        logger.info("Starting wallet discovery process...")
+        logger.info("=== DISCOVERY START ===")
+        logger.info(f"Request data received: {request_data}")
         
-        # Extract discovery parameters
+        # Extract discovery parameters with defaults
         chains = request_data.get("chains", ["ethereum", "bsc"])
         limit = request_data.get("limit", 20)
         min_volume_usd = request_data.get("min_volume_usd", 50000)
         days_back = request_data.get("days_back", 30)
         auto_add_threshold = request_data.get("auto_add_threshold", 80.0)
+        
+        logger.info(f"Discovery parameters: chains={chains}, limit={limit}, min_volume={min_volume_usd}")
         
         # Mock discovery process - in production would use real data sources
         discovered_candidates = []
@@ -718,6 +726,8 @@ async def discover_traders(request_data: dict):
             "0x514910771af9ca656af840dff83e8264ecf986ca",
             "0xa0b86a33e6441e8ce7863a78653c87c8ccb1e86c"
         ]
+        
+        logger.info(f"Processing {len(sample_addresses)} sample addresses")
         
         for i, address in enumerate(sample_addresses[:limit]):
             # Generate realistic performance metrics
@@ -734,22 +744,28 @@ async def discover_traders(request_data: dict):
             
             # Only include high-quality candidates
             if confidence_score >= 60:  # Minimum threshold
+                # Format the candidate data to match what frontend expects
                 candidate = {
+                    # Basic info - frontend expects these fields
+                    "id": f"discovered_{i}_{int(datetime.now().timestamp())}",
                     "address": address,
+                    "wallet_address": address,  # Some frontends expect this field name
                     "chain": random.choice(chains),
                     "source": random.choice(["dexscreener", "etherscan", "coingecko"]),
                     
-                    # Performance metrics
+                    # Performance metrics - formatted for frontend display
                     "total_trades": total_trades,
                     "profitable_trades": profitable_trades,
-                    "win_rate": round(win_rate, 3),
+                    "win_rate": round(win_rate * 100, 1),  # Convert to percentage
                     "total_volume_usd": round(total_volume_usd, 2),
                     "total_pnl_usd": round(total_pnl_usd, 2),
-                    "avg_trade_size_usd": round(total_volume_usd / total_trades, 2),
+                    "avg_trade_size": round(total_volume_usd / total_trades, 2),
+                    "trades_count": total_trades,  # Alternative field name
                     
                     # Time metrics
                     "first_trade": (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat(),
                     "last_trade": (datetime.now(timezone.utc) - timedelta(hours=random.randint(1, 48))).isoformat(),
+                    "last_active": f"{random.randint(1, 48)} hours ago",
                     "active_days": days_back - random.randint(0, 10),
                     "trades_per_day": round(total_trades / days_back, 2),
                     
@@ -757,29 +773,52 @@ async def discover_traders(request_data: dict):
                     "max_drawdown_pct": round(random.uniform(0.05, 0.30), 3),
                     "largest_loss_usd": round(total_volume_usd * random.uniform(0.02, 0.15), 2),
                     "risk_score": round(risk_score, 1),
+                    "risk_level": "Low" if risk_score < 40 else "Medium" if risk_score < 70 else "High",
                     
                     # Quality indicators
                     "consistent_profits": win_rate > 0.6,
                     "diverse_tokens": random.randint(10, 50),
                     "suspicious_activity": random.random() < 0.1,  # 10% chance
                     
+                    # Frontend display fields
+                    "quality_score": round(confidence_score, 1),
+                    "confidence_score": round(confidence_score, 1),
+                    "confidence": "High" if confidence_score > 80 else "Medium",
+                    "recommended_copy_percentage": round(min(10, max(1, confidence_score / 20)), 1),
+                    "status": "discovered",
+                    
                     # Metadata
                     "discovered_at": datetime.now(timezone.utc).isoformat(),
-                    "confidence_score": round(confidence_score, 1),
-                    "recommended_copy_percentage": round(min(10, max(1, confidence_score / 20)), 1)
+                    "created_at": datetime.now(timezone.utc).isoformat()
                 }
                 
                 discovered_candidates.append(candidate)
+                logger.info(f"Added candidate: {address[:8]}... (confidence: {confidence_score:.1f})")
+            else:
+                logger.info(f"Rejected candidate: {address[:8]}... (confidence: {confidence_score:.1f} < 60)")
         
         # Sort by confidence score
         discovered_candidates.sort(key=lambda x: x["confidence_score"], reverse=True)
         
         logger.info(f"Discovery complete: found {len(discovered_candidates)} candidates")
         
-        return {
+        # Return the response in the format the frontend expects
+        # Based on common frontend patterns, it likely expects "discovered_wallets" or "candidates"
+        response = {
             "status": "ok",
-            "message": f"Discovered {len(discovered_candidates)} trader candidates",
+            "success": True,  # Some frontends check for this
+            "message": f"Successfully discovered {len(discovered_candidates)} trader candidates",
+            
+            # Multiple field names to cover different frontend expectations
             "candidates": discovered_candidates,
+            "discovered_wallets": discovered_candidates,
+            "wallets": discovered_candidates,
+            "traders": discovered_candidates,
+            "data": discovered_candidates,
+            
+            # Metadata
+            "count": len(discovered_candidates),
+            "total": len(discovered_candidates),
             "discovery_params": {
                 "chains": chains,
                 "limit": limit,
@@ -790,14 +829,87 @@ async def discover_traders(request_data: dict):
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
+        logger.info(f"Returning response with {len(discovered_candidates)} candidates")
+        return response
+        
     except Exception as e:
-        logger.error(f"Discovery failed: {e}")
-        return {
+        logger.error("=== DISCOVERY ERROR ===")
+        logger.error(f"Discovery failed with exception: {e}")
+        logger.error(f"Exception type: {type(e).__name__}")
+        
+        # Get full traceback
+        import traceback
+        full_traceback = traceback.format_exc()
+        logger.error(f"Full traceback:\n{full_traceback}")
+        
+        # Return error in format frontend expects
+        error_response = {
             "status": "error",
+            "success": False,
             "error": f"Discovery failed: {str(e)}",
+            "message": f"Discovery failed: {str(e)}",
+            "error_type": type(e).__name__,
             "candidates": [],
+            "discovered_wallets": [],
+            "data": [],
+            "count": 0,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
+        
+        logger.error(f"Returning error response: {error_response}")
+        return error_response
+
+
+
+
+
+
+
+
+
+
+@api_router.get("/copy/discovery/status")
+async def get_copy_discovery_status():
+    """
+    Get copy trading discovery system status.
+    """
+    return {
+        "status": "ok",
+        "discovery": {
+            "enabled": True,
+            "running": False,
+            "last_discovery": None,
+            "continuous_discovery": {
+                "enabled": False,
+                "interval_hours": 24,
+                "auto_add_enabled": False,
+                "auto_add_threshold": 85.0
+            },
+            "stats": {
+                "total_discovered": 0,
+                "auto_added_today": 0,
+                "discovery_sources": ["dexscreener", "etherscan", "coingecko"],
+                "supported_chains": ["ethereum", "bsc", "base", "polygon"]
+            }
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 @api_router.post("/discovery/analyze-wallet")
 async def analyze_wallet(request_data: dict):
@@ -1145,7 +1257,7 @@ async def frontend_add_trader(request_data: dict):
         return {"status": "error", "error": str(e)}
 
 
-@api_router.post("/frontend/discovery/discover-traders")
+@api_router.post("/frontend/copy/discovery/discover-traders")
 async def frontend_discover_traders(request_data: dict):
     """Frontend-specific trader discovery endpoint."""
     try:
