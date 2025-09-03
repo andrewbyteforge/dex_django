@@ -422,15 +422,29 @@ def ensure_django_setup():
         else:
             logger.info("Django already configured")
             
-        # REMOVE THE ASYNC-PROBLEMATIC DATABASE TEST
-        # The following lines cause the async context error:
-        # from django.db import connection
-        # with connection.cursor() as cursor:
-        #     cursor.execute("SELECT 1")
-        #     result = cursor.fetchone()
-        #     logger.info(f"Database connection test result: {result}")
+        # CRITICAL FIX: Check apps registry status without calling setup() again
+        # This fixes the "populate() isn't reentrant" error
+        from django.apps import apps
+        if not apps.ready:
+            # Only call setup if apps aren't ready AND settings aren't configured
+            if not settings.configured:
+                django.setup()
+                logger.info("Django apps loaded successfully")
+            else:
+                # Django is configured but apps aren't ready - this shouldn't happen
+                logger.warning("Django configured but apps not ready - this is unusual")
+        else:
+            logger.info("Django apps already loaded")
         
-        # Instead, just verify that Django is configured
+        # Test that we can now import Django models without error
+        try:
+            from django.apps import apps
+            apps.check_apps_ready()
+            logger.info("Django apps registry is ready")
+        except Exception as app_error:
+            logger.error(f"Django apps registry not ready: {app_error}")
+            return False
+            
         logger.info("Django configuration verified successfully")
         return True
         
@@ -463,8 +477,6 @@ def ensure_django_setup():
             logger.error(f"Error during debug info gathering: {debug_e}")
             
         return False
-
-
 
 
 

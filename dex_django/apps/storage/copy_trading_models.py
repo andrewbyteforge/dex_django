@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import (
-    Column, String, Decimal as SQLDecimal, DateTime, Boolean, Text, Integer,
+    Column, String, Numeric, DateTime, Boolean, Text, Integer,
     Float, Index, ForeignKey, Enum as SQLEnum
 )
 from sqlalchemy.ext.declarative import declarative_base
@@ -65,12 +65,12 @@ class TrackedWallet(Base):
     
     # Copy settings
     copy_mode = Column(SQLEnum(CopyMode), nullable=False, default=CopyMode.PERCENTAGE)
-    copy_percentage = Column(SQLDecimal(5, 2), nullable=False, default=Decimal("5.0"))
-    fixed_amount_usd = Column(SQLDecimal(12, 2), nullable=True)
+    copy_percentage = Column(Numeric(5, 2), nullable=False, default=Decimal("5.0"))
+    fixed_amount_usd = Column(Numeric(12, 2), nullable=True)
     
     # Risk controls
-    max_position_usd = Column(SQLDecimal(12, 2), nullable=False, default=Decimal("1000.0"))
-    min_trade_value_usd = Column(SQLDecimal(12, 2), nullable=False, default=Decimal("100.0"))
+    max_position_usd = Column(Numeric(12, 2), nullable=False, default=Decimal("1000.0"))
+    min_trade_value_usd = Column(Numeric(12, 2), nullable=False, default=Decimal("100.0"))
     max_slippage_bps = Column(Integer, nullable=False, default=300)
     
     # Restrictions
@@ -81,7 +81,7 @@ class TrackedWallet(Base):
     # Performance tracking
     total_trades_copied = Column(Integer, nullable=False, default=0)
     successful_copies = Column(Integer, nullable=False, default=0)
-    total_pnl_usd = Column(SQLDecimal(15, 2), nullable=False, default=Decimal("0.0"))
+    total_pnl_usd = Column(Numeric(15, 2), nullable=False, default=Decimal("0.0"))
     win_rate = Column(Float, nullable=False, default=0.0)
     avg_profit_pct = Column(Float, nullable=False, default=0.0)
     
@@ -124,11 +124,11 @@ class DetectedTransaction(Base):
     
     # Trade details
     action = Column(String(10), nullable=False, index=True)  # "buy", "sell"
-    amount_token = Column(SQLDecimal(38, 18), nullable=False, default=Decimal("0"))
-    amount_in = Column(SQLDecimal(38, 18), nullable=False, default=Decimal("0"))
-    amount_out = Column(SQLDecimal(38, 18), nullable=False, default=Decimal("0"))
-    amount_usd = Column(SQLDecimal(15, 2), nullable=False, default=Decimal("0"))
-    gas_fee_usd = Column(SQLDecimal(10, 2), nullable=False, default=Decimal("0"))
+    amount_token = Column(Numeric(38, 18), nullable=False, default=Decimal("0"))
+    amount_in = Column(Numeric(38, 18), nullable=False, default=Decimal("0"))
+    amount_out = Column(Numeric(38, 18), nullable=False, default=Decimal("0"))
+    amount_usd = Column(Numeric(15, 2), nullable=False, default=Decimal("0"))
+    gas_fee_usd = Column(Numeric(10, 2), nullable=False, default=Decimal("0"))
     
     # Analysis metadata
     confidence_score = Column(Float, nullable=False, default=0.0)
@@ -171,8 +171,8 @@ class CopyTrade(Base):
     
     # Copy configuration at time of trade
     copy_mode_used = Column(SQLEnum(CopyMode), nullable=False)
-    copy_percentage_used = Column(SQLDecimal(5, 2), nullable=True)
-    fixed_amount_used = Column(SQLDecimal(12, 2), nullable=True)
+    copy_percentage_used = Column(Numeric(5, 2), nullable=True)
+    fixed_amount_used = Column(Numeric(12, 2), nullable=True)
     
     # Trade details
     chain = Column(SQLEnum(ChainType), nullable=False, index=True)
@@ -182,17 +182,17 @@ class CopyTrade(Base):
     action = Column(String(10), nullable=False, index=True)  # "buy", "sell"
     
     # Amounts and pricing
-    target_amount_usd = Column(SQLDecimal(15, 2), nullable=False)
-    actual_amount_usd = Column(SQLDecimal(15, 2), nullable=True)
-    amount_token = Column(SQLDecimal(38, 18), nullable=True)
-    execution_price = Column(SQLDecimal(38, 18), nullable=True)
+    target_amount_usd = Column(Numeric(15, 2), nullable=False)
+    actual_amount_usd = Column(Numeric(15, 2), nullable=True)
+    amount_token = Column(Numeric(38, 18), nullable=True)
+    execution_price = Column(Numeric(38, 18), nullable=True)
     
     # Slippage and fees
     target_slippage_bps = Column(Integer, nullable=False)
     actual_slippage_bps = Column(Integer, nullable=True)
-    gas_fee_usd = Column(SQLDecimal(10, 2), nullable=True)
-    dex_fee_usd = Column(SQLDecimal(10, 2), nullable=True)
-    total_fees_usd = Column(SQLDecimal(10, 2), nullable=True)
+    gas_fee_usd = Column(Numeric(10, 2), nullable=True)
+    dex_fee_usd = Column(Numeric(10, 2), nullable=True)
+    total_fees_usd = Column(Numeric(10, 2), nullable=True)
     
     # Execution tracking
     status = Column(SQLEnum(CopyTradeStatus), nullable=False, default=CopyTradeStatus.PENDING, index=True)
@@ -200,9 +200,9 @@ class CopyTrade(Base):
     execution_delay_seconds = Column(Integer, nullable=True)
     
     # P&L tracking (for closed positions)
-    entry_price = Column(SQLDecimal(38, 18), nullable=True)
-    exit_price = Column(SQLDecimal(38, 18), nullable=True)
-    pnl_usd = Column(SQLDecimal(15, 2), nullable=True)
+    entry_price = Column(Numeric(38, 18), nullable=True)
+    exit_price = Column(Numeric(38, 18), nullable=True)
+    pnl_usd = Column(Numeric(15, 2), nullable=True)
     pnl_percentage = Column(Float, nullable=True)
     position_closed = Column(Boolean, nullable=False, default=False)
     
@@ -244,10 +244,10 @@ class CopyTradingMetrics(Base):
     skipped_opportunities = Column(Integer, nullable=False, default=0)
     
     # Financial metrics
-    total_volume_usd = Column(SQLDecimal(15, 2), nullable=False, default=Decimal("0"))
-    total_fees_usd = Column(SQLDecimal(12, 2), nullable=False, default=Decimal("0"))
-    realized_pnl_usd = Column(SQLDecimal(15, 2), nullable=False, default=Decimal("0"))
-    unrealized_pnl_usd = Column(SQLDecimal(15, 2), nullable=False, default=Decimal("0"))
+    total_volume_usd = Column(Numeric(15, 2), nullable=False, default=Decimal("0"))
+    total_fees_usd = Column(Numeric(12, 2), nullable=False, default=Decimal("0"))
+    realized_pnl_usd = Column(Numeric(15, 2), nullable=False, default=Decimal("0"))
+    unrealized_pnl_usd = Column(Numeric(15, 2), nullable=False, default=Decimal("0"))
     
     # Performance ratios
     win_rate = Column(Float, nullable=False, default=0.0)
@@ -288,22 +288,22 @@ class WalletPerformanceSnapshot(Base):
     # Portfolio composition
     total_positions = Column(Integer, nullable=False, default=0)
     active_positions = Column(Integer, nullable=False, default=0)
-    total_portfolio_value_usd = Column(SQLDecimal(15, 2), nullable=False, default=Decimal("0"))
+    total_portfolio_value_usd = Column(Numeric(15, 2), nullable=False, default=Decimal("0"))
     
     # Trading activity
     trades_count = Column(Integer, nullable=False, default=0)
-    volume_usd = Column(SQLDecimal(15, 2), nullable=False, default=Decimal("0"))
+    volume_usd = Column(Numeric(15, 2), nullable=False, default=Decimal("0"))
     unique_tokens_traded = Column(Integer, nullable=False, default=0)
     
     # Performance metrics
-    period_pnl_usd = Column(SQLDecimal(15, 2), nullable=False, default=Decimal("0"))
+    period_pnl_usd = Column(Numeric(15, 2), nullable=False, default=Decimal("0"))
     period_pnl_percentage = Column(Float, nullable=False, default=0.0)
     win_rate = Column(Float, nullable=False, default=0.0)
-    best_trade_pnl_usd = Column(SQLDecimal(15, 2), nullable=True)
-    worst_trade_pnl_usd = Column(SQLDecimal(15, 2), nullable=True)
+    best_trade_pnl_usd = Column(Numeric(15, 2), nullable=True)
+    worst_trade_pnl_usd = Column(Numeric(15, 2), nullable=True)
     
     # Risk metrics
-    max_drawdown_usd = Column(SQLDecimal(15, 2), nullable=True)
+    max_drawdown_usd = Column(Numeric(15, 2), nullable=True)
     max_drawdown_percentage = Column(Float, nullable=True)
     volatility = Column(Float, nullable=True)
     sharpe_ratio = Column(Float, nullable=True)

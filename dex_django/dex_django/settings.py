@@ -34,32 +34,31 @@ ALLOWED_HOSTS = []
 INSTALLED_APPS = [
     # Default Django apps
     "django.contrib.admin",
-    "django.contrib.auth",
+    "django.contrib.auth", 
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    'apps.intelligence',
     
-
     # Third-party
     "rest_framework",
     "channels",
-
-    # Local apps
-    "apps.core.apps.CoreConfig",
-    "apps.api",
-    "apps.storage.apps.StorageConfig",
-    "apps.ledger",
-    "apps.ws",
-    "apps.discovery",
-    "apps.dex",
-    "apps.chains",
-    "apps.strategy",
-    "apps.trading",
-    "apps.services",
-    "apps.sim",
     "corsheaders", 
+
+    # Local apps - FIXED WITH CORRECT PATHS
+    "dex_django.apps.core.apps.CoreConfig",
+    "dex_django.apps.api",
+    "dex_django.apps.storage.apps.StorageConfig", 
+    "dex_django.apps.ledger",
+    "dex_django.apps.ws",
+    "dex_django.apps.discovery",
+    "dex_django.apps.dex", 
+    "dex_django.apps.chains",
+    "dex_django.apps.strategy",
+    "dex_django.apps.trading",
+    "dex_django.apps.services",
+    "dex_django.apps.sim",
+    "dex_django.apps.intelligence",
 ]
 
 
@@ -79,7 +78,7 @@ INTELLIGENCE_SETTINGS = {
     }
 }
 
-ASGI_APPLICATION = 'dex_django.asgi.application'
+ASGI_APPLICATION = 'dex_django.dex_django.asgi.application'
 
 CHANNEL_LAYERS = {
     "default": {
@@ -105,7 +104,7 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
-    "EXCEPTION_HANDLER": "apps.api.exceptions.exception_handler",
+    "EXCEPTION_HANDLER": "dex_django.apps.api.exceptions.exception_handler",
 }
 
 CORS_ALLOWED_ORIGINS = [
@@ -115,8 +114,6 @@ CORS_ALLOWED_ORIGINS = [
 
 CORS_ALLOW_ALL_ORIGINS = False  # Keep security tight
 
-# Ensure all API calls go to Django backend
-CORS_ALLOW_ALL_ORIGINS = False  # Keep security tight
 # allow our custom header
 CORS_ALLOW_HEADERS = list({
     "accept",
@@ -132,6 +129,7 @@ CORS_EXPOSE_HEADERS = ["X-Trace-Id"]
 
 
 
+# Update MIDDLEWARE paths
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -141,11 +139,11 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    "dex_django.middleware.ApiKeyAuthMiddleware",  
-    "dex_django.middleware.ApiRequestLogMiddleware",
+    "dex_django.dex_django.middleware.ApiKeyAuthMiddleware",  
+    "dex_django.dex_django.middleware.ApiRequestLogMiddleware",
 ]
 
-ROOT_URLCONF = 'dex_django.urls'
+ROOT_URLCONF = 'dex_django.dex_django.urls'
 
 TEMPLATES = [
     {
@@ -167,11 +165,6 @@ API_KEY = os.environ.get("API_KEY", "")  # set in environment for real use
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 
-import os
-from pathlib import Path
-
-
-
 # --- Logging (JSON + file rotation with redaction) ---
 LOG_DIR = BASE_DIR / "data" / "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -182,7 +175,7 @@ LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "filters": {
-        "redact_secrets": {"()": "dex_django.logging_filters.RedactSecretsFilter"}
+        "redact_secrets": {"()": "dex_django.dex_django.logging_filters.RedactSecretsFilter"}
     },
     "formatters": {
         "json": {
@@ -218,7 +211,7 @@ LOGGING = {
 
 
 
-WSGI_APPLICATION = 'dex_django.wsgi.application'
+WSGI_APPLICATION = 'dex_django.dex_django.wsgi.application'
 
 
 # Database
