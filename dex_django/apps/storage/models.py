@@ -27,6 +27,7 @@ class Provider(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        app_label = "storage"  # FIXED: Added explicit app_label
         indexes = [
             models.Index(fields=["kind", "enabled"]),
         ]
@@ -49,6 +50,7 @@ class Token(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        app_label = "storage"  # FIXED: Added explicit app_label
         unique_together = ("chain", "address")
         indexes = [
             models.Index(fields=["chain", "symbol"]),
@@ -77,6 +79,7 @@ class Pair(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        app_label = "storage"  # FIXED: Added explicit app_label
         unique_together = ("chain", "dex", "address")
         indexes = [
             models.Index(fields=["chain", "dex"]),
@@ -120,6 +123,7 @@ class Trade(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        app_label = "storage"  # FIXED: Added explicit app_label
         indexes = [
             models.Index(fields=["chain", "dex"]),
             models.Index(fields=["tx_hash"]),
@@ -151,6 +155,7 @@ class LedgerEntry(models.Model):
     notes = models.CharField(max_length=240, blank=True)
 
     class Meta:
+        app_label = "storage"  # FIXED: Added explicit app_label
         indexes = [
             models.Index(fields=["timestamp"]),
             models.Index(fields=["event_type"]),
@@ -238,13 +243,19 @@ class FollowedTrader(models.Model):
         max_digits=12,
         decimal_places=2,
         default=Decimal("1000.0"),
-        validators=[MinValueValidator(Decimal("50.0"))],
+        validators=[MinValueValidator(Decimal("50.0")), MaxValueValidator(Decimal("50000.0"))],
         help_text="Maximum position size in USD"
+    )
+    min_trade_usd = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("50.0"),
+        validators=[MinValueValidator(Decimal("10.0"))],
+        help_text="Minimum original trade size to copy"
     )
     max_slippage_bps = models.PositiveIntegerField(
         default=300,
-        validators=[MinValueValidator(50), MaxValueValidator(1000)],
-        help_text="Maximum slippage in basis points"
+        validators=[MinValueValidator(50), MaxValueValidator(1000)]
     )
     max_risk_score = models.DecimalField(
         max_digits=3,
@@ -254,7 +265,7 @@ class FollowedTrader(models.Model):
         help_text="Maximum risk score threshold (1.0-10.0)"
     )
     
-    # Chain and token restrictions
+    # Chain and token filters
     allowed_chains = models.JSONField(
         default=list,
         help_text="List of allowed chains: ['ethereum', 'bsc', 'base', 'polygon', 'solana']"
@@ -268,9 +279,11 @@ class FollowedTrader(models.Model):
         help_text="List of token addresses to exclusively copy (empty = all allowed)"
     )
     
-    # Time and direction restrictions
+    # Trade type filters
     copy_buy_only = models.BooleanField(default=False)
     copy_sell_only = models.BooleanField(default=False)
+    
+    # Trade size filters
     min_trade_usd = models.DecimalField(
         max_digits=12,
         decimal_places=2,
@@ -293,51 +306,47 @@ class FollowedTrader(models.Model):
         default=Decimal("0.0")
     )
     
-    # Metadata
+    # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     last_activity_at = models.DateTimeField(null=True, blank=True)
-    
+
     class Meta:
-        db_table = "copy_followed_traders"
-        ordering = ["-created_at"]
+        app_label = "storage"  # FIXED: Added explicit app_label
         verbose_name = "Followed Trader"
-        verbose_name_plural = "Followed Traders"
-    
+        verbose_name_plural = "Followed Traders" 
+        db_table = "copy_followed_traders"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['wallet_address']),
+            models.Index(fields=['status', '-created_at']),
+            models.Index(fields=['-last_activity_at']),
+        ]
+
     def __str__(self) -> str:
-        name = self.trader_name or f"{self.wallet_address[:8]}..."
-        return f"{name} ({self.get_status_display()})"
-    
+        return f"{self.trader_name or self.wallet_address[:8]}"
+
     @property
-    def win_rate_pct(self) -> float:
-        """Calculate win rate percentage."""
+    def success_rate(self) -> float:
+        """Calculate success rate percentage."""
         if self.total_copies == 0:
             return 0.0
         return (self.successful_copies / self.total_copies) * 100
-    
-    @property
-    def short_address(self) -> str:
-        """Get shortened wallet address for display."""
-        return f"{self.wallet_address[:8]}...{self.wallet_address[-4:]}"
-    
-    def update_activity(self) -> None:
-        """Update last activity timestamp."""
-        self.last_activity_at = datetime.now(timezone.utc)
-        self.save(update_fields=["last_activity_at"])
-    
-    def increment_copy_stats(self, pnl_usd: Decimal, is_successful: bool) -> None:
-        """Update copy trading statistics."""
+
+    def update_stats(self, success: bool, pnl_usd: Decimal) -> None:
+        """Update performance statistics."""
         self.total_copies += 1
-        if is_successful:
+        if success:
             self.successful_copies += 1
         self.total_pnl_usd += pnl_usd
-        self.save(update_fields=["total_copies", "successful_copies", "total_pnl_usd"])
+        self.last_activity_at = timezone.now()
+        self.save()
 
 
 class CopyTrade(models.Model):
     """
-    Record of copy trade attempts and results.
-    Links to existing LedgerEntry for audit trail.
+    Individual copy trade execution record.
+    Links to existing Trade model when executed.
     """
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -348,89 +357,71 @@ class CopyTrade(models.Model):
         on_delete=models.CASCADE,
         related_name="copy_trades"
     )
-    # Link to LedgerEntry if trade was executed
-    ledger_entry = models.ForeignKey(
-        'LedgerEntry',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="copy_trades"
-    )
-    # Link to original Trade if executed
     trade = models.ForeignKey(
-        'Trade',
+        Trade,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="copy_trades"
+        related_name="copy_trades",
+        help_text="Link to executed trade (if any)"
+    )
+    ledger_entry = models.ForeignKey(
+        LedgerEntry,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="copy_trades",
+        help_text="Link to ledger entry"
     )
     
     # Original trade details
-    original_tx_hash = models.CharField(max_length=128, db_index=True)
-    original_block_number = models.BigIntegerField()
-    original_timestamp = models.DateTimeField()
+    original_tx_hash = models.CharField(max_length=100, db_index=True)
+    original_trader_address = models.CharField(max_length=64)
+    original_block = models.PositiveIntegerField(null=True, blank=True)
     
-    # Trade details
-    chain = models.CharField(max_length=20)
-    dex_name = models.CharField(max_length=50)
-    token_address = models.CharField(max_length=64)
-    token_symbol = models.CharField(max_length=20, blank=True)
-    pair_address = models.CharField(max_length=64, blank=True)
+    # Copy trade details
+    chain = models.CharField(max_length=20, db_index=True)
+    dex = models.CharField(max_length=40)
+    token_address = models.CharField(max_length=64, db_index=True)
+    token_symbol = models.CharField(max_length=24, blank=True)
+    action = models.CharField(max_length=10)  # "buy" or "sell"
     
-    # Trade amounts (original)
-    original_amount_in = models.DecimalField(max_digits=38, decimal_places=18)
-    original_amount_out = models.DecimalField(max_digits=38, decimal_places=18)
-    original_amount_usd = models.DecimalField(max_digits=15, decimal_places=2)
-    
-    # Copy trade configuration
-    copy_amount_usd = models.DecimalField(max_digits=15, decimal_places=2)
-    copy_amount_in = models.DecimalField(
+    # Trade amounts and pricing
+    original_amount_usd = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        null=True,
+        blank=True
+    )
+    copy_amount_usd = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        null=True,
+        blank=True
+    )
+    execution_price = models.DecimalField(
         max_digits=38,
         decimal_places=18,
         null=True,
         blank=True
     )
-    copy_amount_out = models.DecimalField(
-        max_digits=38,
-        decimal_places=18,
-        null=True,
-        blank=True
-    )
     
-    # Execution details
+    # Execution results
     status = models.CharField(
         max_length=20,
         choices=CopyStatus.choices,
         default=CopyStatus.PENDING,
         db_index=True
     )
-    copy_tx_hash = models.CharField(max_length=128, blank=True)
-    copy_block_number = models.BigIntegerField(null=True, blank=True)
-    
-    # Slippage and timing
-    execution_delay_seconds = models.IntegerField(
-        null=True,
-        blank=True,
-        help_text="Delay between original tx and copy attempt"
-    )
-    realized_slippage_bps = models.IntegerField(null=True, blank=True)
-    
-    # Gas and fees
-    gas_used = models.BigIntegerField(null=True, blank=True)
-    gas_price_gwei = models.DecimalField(
-        max_digits=12,
-        decimal_places=2,
-        null=True,
-        blank=True
-    )
-    total_fees_usd = models.DecimalField(
+    slippage_bps = models.IntegerField(null=True, blank=True)
+    gas_fee_usd = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         null=True,
         blank=True
     )
     
-    # Risk checks
+    # Risk assessment
     risk_score = models.DecimalField(
         max_digits=3,
         decimal_places=1,
@@ -440,7 +431,7 @@ class CopyTrade(models.Model):
     )
     risk_reason = models.TextField(blank=True)
     
-    # Result tracking
+    # P&L tracking
     pnl_usd = models.DecimalField(
         max_digits=15,
         decimal_places=2,
@@ -449,58 +440,45 @@ class CopyTrade(models.Model):
     )
     is_profitable = models.BooleanField(null=True, blank=True)
     
-    # Copy trading specific flags
+    # Metadata
     is_paper = models.BooleanField(
         default=False,
         help_text="True if this was a paper trading copy"
     )
-    
-    # Metadata
     trace_id = models.CharField(max_length=64, blank=True)
     notes = models.TextField(blank=True)
+    
+    # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
-        db_table = "copy_trades"
-        ordering = ["-created_at"]
-        indexes = [
-            models.Index(fields=["followed_trader", "-created_at"]),
-            models.Index(fields=["original_tx_hash"]),
-            models.Index(fields=["chain", "token_address"]),
-            models.Index(fields=["status", "-created_at"]),
-            models.Index(fields=["is_paper", "-created_at"]),
-        ]
+        app_label = "storage"  # FIXED: Added explicit app_label
         verbose_name = "Copy Trade"
         verbose_name_plural = "Copy Trades"
-    
+        db_table = "copy_trades"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['followed_trader', '-created_at']),
+            models.Index(fields=['original_tx_hash']),
+            models.Index(fields=['chain', 'token_address']),
+            models.Index(fields=['status', '-created_at']),
+            models.Index(fields=['is_paper', '-created_at']),
+        ]
+
     def __str__(self) -> str:
-        symbol = self.token_symbol or self.token_address[:8]
-        paper_flag = " [PAPER]" if self.is_paper else ""
-        return f"Copy {symbol} - {self.get_status_display()} (${self.copy_amount_usd}){paper_flag}"
-    
-    @property
-    def success_display(self) -> str:
-        """Display-friendly success indicator."""
-        if self.status == CopyStatus.EXECUTED:
-            return "✅ Executed"
-        elif self.status == CopyStatus.FAILED:
-            return "❌ Failed"
-        elif self.status == CopyStatus.SKIPPED:
-            return "⏭️ Skipped"
-        else:
-            return "⏳ Pending"
+        return f"Copy {self.action} {self.token_symbol} for {self.followed_trader}"
 
 
 class CopyTradeFilter(models.Model):
     """
-    Global filters to control which trades get copied.
-    Can be applied across all followed traders.
+    Advanced filtering rules for copy trading.
+    Allows complex filtering logic beyond basic trader settings.
     """
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     
-    # Filter identification
+    # Filter metadata
     name = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True, db_index=True)
@@ -509,12 +487,14 @@ class CopyTradeFilter(models.Model):
         help_text="Filter priority (lower = higher priority)"
     )
     
-    # Token filters
+    # Liquidity filters
     min_liquidity_usd = models.DecimalField(
         max_digits=15,
         decimal_places=2,
         default=Decimal("10000.0")
     )
+    
+    # Token filters
     max_tax_percentage = models.DecimalField(
         max_digits=5,
         decimal_places=2,
@@ -543,14 +523,7 @@ class CopyTradeFilter(models.Model):
     )
     require_verified_contract = models.BooleanField(default=True)
     
-    # Chain and DEX filters
-    def default_allowed_chains():
-        return ["ethereum", "bsc", "base"]
-
-    def default_allowed_dexes():
-        return ["uniswap_v2", "uniswap_v3", "pancake_v2"]
-    
-    # Performance filters
+    # Trader quality filters
     min_trader_success_rate = models.DecimalField(
         max_digits=5,
         decimal_places=2,
@@ -558,16 +531,19 @@ class CopyTradeFilter(models.Model):
         help_text="Minimum trader success rate percentage"
     )
     
-    # Metadata
+    # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
-        db_table = "copy_trade_filters"
-        ordering = ["priority", "-created_at"]
+        app_label = "storage"  # FIXED: Added explicit app_label
         verbose_name = "Copy Trade Filter"
         verbose_name_plural = "Copy Trade Filters"
-    
+        ordering = ['priority', 'name']
+        indexes = [
+            models.Index(fields=['is_active', 'priority']),
+            models.Index(fields=['min_liquidity_usd']),
+        ]
+
     def __str__(self) -> str:
-        status = "🟢 Active" if self.is_active else "🔴 Inactive"
-        return f"{self.name} - {status}"
+        return f"{self.name} ({'active' if self.is_active else 'inactive'})"

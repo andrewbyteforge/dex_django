@@ -21,7 +21,7 @@ import random
 import sys
 from datetime import datetime, timezone
 from typing import Any, Dict, List
-
+import traceback
 import uvicorn
 import uuid
 from fastapi import APIRouter
@@ -641,164 +641,99 @@ async def get_traders_endpoint():
         }
 
 
-@discovery_router.post("/copy/traders")
-async def add_trader_endpoint(request_data: dict = None):
-    """
-    Add a trader to the copy trading system.
-    This endpoint is called when users click "Add Trader" in the frontend.
-    """
+@api_router.post("/copy/traders")
+async def add_trader_endpoint(request_data: dict):
+    """Add a new trader to copy trading system with proper field mapping."""
     try:
-        logger.info("=== ADD TRADER ENDPOINT CALLED ===")
-        logger.info(f"Request data: {request_data}")
+        # Import FollowedTrader model
+        from dex_django.apps.storage.models import FollowedTrader
+        from decimal import Decimal
+        from django.utils import timezone
         
-        # Ensure Django is configured
-        if not ensure_django_setup():
-            logger.error("Django setup failed - returning error response")
-            return {
-                "status": "error",
-                "success": False,
-                "error": "Django configuration failed",
-                "message": "Django configuration failed"
-            }
+        logger.info(f"Adding trader with data: {request_data}")
         
-        # Parse request data - frontend sends wallet_address, not address
-        body = request_data or {}
-        trader_address = body.get('wallet_address') or body.get('address', '')
-        trader_name = body.get('trader_name', '')
+        # Extract and validate required fields
+        wallet_address = request_data.get("wallet_address", "").lower().strip()
+        if not wallet_address or not wallet_address.startswith("0x") or len(wallet_address) != 42:
+            return {"status": "error", "error": "Invalid wallet address"}
         
-        if not trader_address:
-            logger.error("No trader address provided")
-            return {
-                "status": "error",
-                "success": False,
-                "error": "Trader address is required",
-                "message": "Trader address is required"
-            }
+        # Check if trader already exists
+        if FollowedTrader.objects.filter(wallet_address=wallet_address).exists():
+            return {"status": "error", "error": "Trader is already being followed"}
         
-        if not trader_name:
-            logger.error("No trader name provided")
-            return {
-                "status": "error", 
-                "success": False,
-                "error": "Trader name is required",
-                "message": "Trader name is required"
-            }
+        # Map frontend fields to FollowedTrader model fields
+        trader_data = {
+            "wallet_address": wallet_address,
+            "trader_name": request_data.get("trader_name", "") or f"Trader {wallet_address[:8]}",
+            "description": request_data.get("description", ""),
+            "status": "active",
             
-        logger.info(f"Adding trader: {trader_address} (name: {trader_name})")
+            # Copy settings
+            "copy_mode": request_data.get("copy_mode", "percentage"),
+            "copy_percentage": Decimal(str(request_data.get("copy_percentage", 5.0))),
+            "fixed_amount_usd": Decimal(str(request_data.get("fixed_amount_usd", 0.0))) if request_data.get("fixed_amount_usd") else None,
+            
+            # Risk controls
+            "max_position_usd": Decimal(str(request_data.get("max_position_usd", 1000.0))),
+            "min_trade_usd": Decimal(str(request_data.get("min_trade_value_usd", 50.0))),
+            "max_slippage_bps": int(request_data.get("max_slippage_bps", 300)),
+            "max_risk_score": Decimal(str(request_data.get("max_risk_score", 7.0))),
+            
+            # Chain filters - FIXED: Convert single chain to allowed_chains array
+            "allowed_chains": [request_data.get("chain", "ethereum")],  # Convert single chain to array
+            "blacklisted_tokens": request_data.get("blacklisted_tokens", []),
+            "whitelisted_tokens": request_data.get("whitelisted_tokens", []),
+            
+            # Trade type filters
+            "copy_buy_only": request_data.get("copy_buy_only", False),
+            "copy_sell_only": request_data.get("copy_sell_only", False),
+            
+            # Trade size filters
+            "min_trade_usd": Decimal(str(request_data.get("min_trade_usd", 100.0))),
+            "max_trade_usd": Decimal(str(request_data.get("max_trade_usd", 50000.0))),
+        }
         
-        # Save to real Django database
-        try:
-            # Try multiple import paths for the FollowedTrader model
-            FollowedTrader = None
-            
-            # Try the correct Django apps path first
-            try:
-                from dex_django.apps.storage.models import FollowedTrader
-                logger.info("Successfully imported FollowedTrader from dex_django.apps.storage.models")
-            except ImportError:
-                try:
-                    from apps.storage.models import FollowedTrader
-                    logger.info("Successfully imported FollowedTrader from apps.storage.models")
-                except ImportError:
-                    try:
-                        from storage.models import FollowedTrader
-                        logger.info("Successfully imported FollowedTrader from storage.models")
-                    except ImportError:
-                        logger.error("Could not import FollowedTrader from any location")
-                        return {
-                            "status": "error",
-                            "success": False,
-                            "error": "Model import failed",
-                            "message": "Could not import FollowedTrader model"
-                        }
-            
-            from decimal import Decimal
-            
-            # Validate copy mode logic
-            copy_buy_only = bool(body.get('copy_buy_only', False))
-            copy_sell_only = bool(body.get('copy_sell_only', False))
-            
-            # Ensure both can't be true (invalid state)
-            if copy_buy_only and copy_sell_only:
-                copy_buy_only = False
-                copy_sell_only = False
-            
-            logger.info(f"Creating FollowedTrader with data: address={trader_address}, name={trader_name}")
-            
-            # Create new FollowedTrader in database
-            trader = FollowedTrader.objects.create(
-                wallet_address=trader_address,
-                trader_name=trader_name,
-                description=body.get('description', ''),
-                chain=body.get('chain', 'ethereum'),
-                copy_percentage=Decimal(str(body.get('copy_percentage', 5.0))),
-                max_position_usd=Decimal(str(body.get('max_position_usd', 1000.0))),
-                max_slippage_bps=int(body.get('max_slippage_bps', 300)),
-                copy_buy_only=copy_buy_only,
-                copy_sell_only=copy_sell_only,
-                status='active'
-            )
-            
-            logger.info(f"Successfully created trader in database with ID: {trader.id}")
-            
-            # Return the actual saved data
-            trader_data = {
+        # Create the trader
+        trader = FollowedTrader.objects.create(**trader_data)
+        
+        logger.info(f"Successfully created trader: {trader.id}")
+        
+        # Return success response with created trader data
+        return {
+            "status": "ok",
+            "message": "Trader added successfully",
+            "trader": {
                 "id": str(trader.id),
                 "wallet_address": trader.wallet_address,
                 "trader_name": trader.trader_name,
                 "description": trader.description,
-                "chain": trader.chain,
+                "chain": request_data.get("chain", "ethereum"),  # Return the original chain for frontend
+                "allowed_chains": trader.allowed_chains,
+                "copy_mode": trader.copy_mode,
                 "copy_percentage": float(trader.copy_percentage),
+                "fixed_amount_usd": float(trader.fixed_amount_usd) if trader.fixed_amount_usd else None,
                 "max_position_usd": float(trader.max_position_usd),
-                "max_slippage_bps": trader.max_slippage_bps,
                 "copy_buy_only": trader.copy_buy_only,
                 "copy_sell_only": trader.copy_sell_only,
                 "status": trader.status,
                 "created_at": trader.created_at.isoformat(),
-                "last_activity_at": trader.last_activity_at.isoformat() if trader.last_activity_at else None,
-                "total_pnl_usd": str(trader.total_pnl_usd or 0),
-                "win_rate_pct": float(trader.win_rate_pct or 0),
-                "total_trades": trader.total_trades or 0,
-                "avg_trade_size_usd": float(trader.avg_trade_size_usd or 0),
-                "quality_score": trader.quality_score or 75,
-                "is_following": True
             }
-            
-            logger.info(f"Successfully saved trader {trader_name} to database with ID {trader.id}")
-            
-            return {
-                "status": "ok",
-                "success": True,
-                "message": f"Trader {trader_name} ({trader_address[:10]}...) added successfully",
-                "trader": trader_data,
-                "data": trader_data,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-            
-        except Exception as db_error:
-            logger.error(f"Database save failed: {db_error}")
-            import traceback
-            logger.error(f"Full traceback: {traceback.format_exc()}")
-            return {
-                "status": "error",
-                "success": False,
-                "error": f"Database error: {str(db_error)}",
-                "message": "Failed to save trader to database",
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
+        }
         
     except Exception as e:
-        logger.error(f"Add trader endpoint error: {e}")
-        import traceback
+        logger.error(f"Database save failed: {e}")
         logger.error(f"Full traceback: {traceback.format_exc()}")
         return {
-            "status": "error",
-            "success": False,
-            "error": str(e),
-            "message": f"Failed to add trader: {str(e)}",
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "status": "error", 
+            "error": f"Failed to add trader: {str(e)}"
         }
 
+
+# Alternative endpoint that handles the exact same functionality
+@api_router.post("/copy/traders")
+async def add_trader_endpoint_alt(request_data: dict):
+    """Alternative add trader endpoint (same functionality as above)."""
+    return await add_trader_endpoint(request_data)
 
 
 

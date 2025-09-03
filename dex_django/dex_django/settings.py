@@ -34,7 +34,7 @@ ALLOWED_HOSTS = []
 INSTALLED_APPS = [
     # Default Django apps
     "django.contrib.admin",
-    "django.contrib.auth", 
+    "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
@@ -43,16 +43,15 @@ INSTALLED_APPS = [
     # Third-party
     "rest_framework",
     "channels",
-    "corsheaders", 
+    "corsheaders",
 
     # Local apps - FIXED WITH CORRECT PATHS
     "dex_django.apps.core.apps.CoreConfig",
-    "dex_django.apps.api",
-    "dex_django.apps.storage.apps.StorageConfig", 
+    "dex_django.apps.api",    
     "dex_django.apps.ledger",
     "dex_django.apps.ws",
     "dex_django.apps.discovery",
-    "dex_django.apps.dex", 
+    "dex_django.apps.dex",
     "dex_django.apps.chains",
     "dex_django.apps.strategy",
     "dex_django.apps.trading",
