@@ -16,12 +16,14 @@ use it if desired:
 from __future__ import annotations
 
 import aiohttp 
+import asyncio
 import logging
 import os
 import random
 import sys
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 import traceback
 import uvicorn
 import uuid
@@ -37,6 +39,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger("debug_main")
 
+# ============================================================================
+# COPY TRADING SYSTEM INTEGRATION
+# ============================================================================
+
+# Global copy trading system status
+copy_trading_system_initialized = False
+copy_trading_service_manager = None
+
 
 def install_missing_dependencies() -> None:
     """Install missing dependencies if needed."""
@@ -48,6 +58,142 @@ def install_missing_dependencies() -> None:
 
         subprocess.check_call([sys.executable, "-m", "pip", "install", "aiohttp"])
         logger.info("aiohttp installed successfully")
+
+
+async def initialize_copy_trading_system():
+    """Initialize copy trading system with correct paths."""
+    global copy_trading_system_initialized, copy_trading_service_manager
+    
+    if copy_trading_system_initialized:
+        logger.info("Copy trading system already initialized")
+        return {"success": True, "message": "Already initialized"}
+    
+    try:
+        logger.info("🚀 Initializing copy trading system in debug_main...")
+        
+        # FIXED: Use dex_django instead of backend
+        dex_django_path = Path(__file__).parent / "dex_django"
+        if str(dex_django_path) not in sys.path:
+            sys.path.insert(0, str(dex_django_path))
+            logger.info(f"Added dex_django path: {dex_django_path}")
+        
+        # FIXED: Import from dex_django.apps instead of backend.app
+        from dex_django.apps.core.service_manager import service_manager
+        copy_trading_service_manager = service_manager
+        
+        # Initialize all services
+        result = await service_manager.initialize_all_services()
+        
+        if result["success"]:
+            copy_trading_system_initialized = True
+            logger.info("✅ Copy trading system initialized successfully")
+            return result
+        else:
+            logger.error(f"❌ Copy trading system initialization failed: {result['message']}")
+            return result
+    
+    except ImportError as e:
+        logger.warning(f"⚠️ Copy trading components not available: {e}")
+        return {"success": False, "message": f"Copy trading components not available: {e}"}
+    
+    except Exception as e:
+        logger.error(f"❌ Unexpected error during copy trading initialization: {e}")
+        return {"success": False, "message": f"Unexpected error: {e}"}
+
+
+
+
+
+async def shutdown_copy_trading_system():
+    """
+    Shutdown the copy trading system gracefully.
+    Called during FastAPI app shutdown.
+    """
+    global copy_trading_system_initialized, copy_trading_service_manager
+    
+    if not copy_trading_system_initialized:
+        logger.info("Copy trading system not initialized, nothing to shutdown")
+        return {"success": True, "message": "Nothing to shutdown"}
+    
+    try:
+        logger.info("🛑 Shutting down copy trading system...")
+        
+        if copy_trading_service_manager:
+            # Shutdown all services
+            result = await copy_trading_service_manager.shutdown_all_services()
+            
+            if result["success"]:
+                logger.info("✅ Copy trading system shut down successfully")
+            else:
+                logger.error(f"❌ Copy trading system shutdown failed: {result['message']}")
+            
+            copy_trading_system_initialized = False
+            copy_trading_service_manager = None
+            
+            return result
+        else:
+            logger.warning("⚠️ Service manager not available for shutdown")
+            return {"success": True, "message": "No service manager to shutdown"}
+    
+    except Exception as e:
+        logger.error(f"❌ Error during copy trading shutdown: {e}")
+        return {"success": False, "message": str(e)}
+
+
+def register_copy_trading_routes(app):
+    """
+    Register copy trading API routes and WebSocket endpoints.
+
+    Args:
+        app: FastAPI application instance
+    """
+    try:
+        logger.info("📡 Registering copy trading routes...")
+
+        # Register API routes - FIXED IMPORT PATH
+        try:
+            from dex_django.apps.api.copy_trading_integrated import router as integrated_router
+            app.include_router(integrated_router, tags=["copy-trading-integrated"])
+
+            logger.info("✅ Copy trading API routes registered")
+
+            # List registered routes for debugging
+            copy_routes = [
+                "GET /api/v1/copy/status",
+                "POST /api/v1/copy/system/control",
+                "GET /api/v1/copy/traders",
+                "POST /api/v1/copy/traders",
+                "DELETE /api/v1/copy/traders/{trader_key}",
+                "GET /api/v1/copy/traders/{trader_key}",
+                "GET /api/v1/copy/trades",
+                "POST /api/v1/copy/paper/toggle",
+                "GET /api/v1/copy/health",
+            ]
+
+            logger.info("Available copy trading endpoints:")
+            for route in copy_routes:
+                logger.info(f"  - {route}")
+
+        except ImportError as e:
+            logger.warning(f"⚠️ Copy trading API not available: {e}")
+
+        # Register WebSocket endpoints - FIXED IMPORT PATH
+        try:
+            from dex_django.apps.ws.copy_trading import router as ws_router
+            app.include_router(ws_router, tags=["copy-trading-websockets"])
+
+            logger.info("✅ Copy trading WebSocket endpoints registered")
+            logger.info("Available WebSocket endpoints:")
+            logger.info("  - WS /ws/copy-trading")
+
+        except ImportError as e:
+            logger.warning(f"⚠️ Copy trading WebSocket not available: {e}")
+
+        return {"success": True, "message": "Copy trading routes registered"}
+
+    except Exception as e:
+        logger.error(f"❌ Failed to register copy trading routes: {e}")
+        return {"success": False, "message": f"Route registration failed: {e}"}
 
 
 # -----------------------------------------------------------------------------
@@ -317,7 +463,6 @@ async def fetch_real_opportunities() -> List[Dict[str, Any]]:
     return unique_opportunities[:50]  # Return top 50 opportunities
 
 
-
 api_router = APIRouter(prefix="/api/v1")
 
 
@@ -480,8 +625,6 @@ def ensure_django_setup():
         return False
 
 
-
-
 # Create a discovery router that can be imported by debug server factory
 discovery_router = APIRouter(prefix="/api/v1")
 
@@ -560,10 +703,7 @@ async def discover_traders_endpoint(request_data: dict = None):
 
 @discovery_router.get("/copy/traders")
 async def get_traders_endpoint():
-    """
-    Get list of followed traders from Django database.
-    Returns real persisted trader data.
-    """
+    """Get list of followed traders from Django database - FIXED VERSION"""
     try:
         # Ensure Django is configured
         if not ensure_django_setup():
@@ -577,17 +717,16 @@ async def get_traders_endpoint():
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
         
-        # Try to use Django ORM to get real traders
         traders = []
         
         try:
             # Import Django models
             from apps.storage.models import FollowedTrader
             
-            # Query all active followed traders
-            followed_traders = FollowedTrader.objects.filter(
-                status__in=['active', 'paused']
-            ).order_by('-created_at')
+            # Query ALL followed traders (not just active/paused)
+            followed_traders = FollowedTrader.objects.all().order_by('-created_at')
+            
+            logger.info(f"Found {followed_traders.count()} traders in database")
             
             for trader in followed_traders:
                 trader_data = {
@@ -595,7 +734,7 @@ async def get_traders_endpoint():
                     "wallet_address": trader.wallet_address,
                     "trader_name": trader.trader_name or f"Trader_{trader.wallet_address[-4:]}",
                     "description": trader.description or "",
-                    "chain": trader.chain,
+                    "chain": trader.allowed_chains[0] if trader.allowed_chains else "ethereum",  # FIXED: Get chain from allowed_chains
                     "copy_percentage": float(trader.copy_percentage),
                     "max_position_usd": float(trader.max_position_usd),
                     "max_slippage_bps": trader.max_slippage_bps,
@@ -609,7 +748,8 @@ async def get_traders_endpoint():
                     "total_trades": trader.total_trades or 0,
                     "avg_trade_size_usd": float(trader.avg_trade_size_usd or 0),
                     "quality_score": trader.quality_score or 75,
-                    "is_following": True
+                    "is_following": True,
+                    "monitoring_active": False  # Will be true when monitoring starts
                 }
                 traders.append(trader_data)
                 
@@ -617,9 +757,18 @@ async def get_traders_endpoint():
             
         except Exception as db_error:
             logger.error(f"Database query failed: {db_error}")
-            # If database fails, return empty list
-            traders = []
+            # Don't return empty list, return the error
+            return {
+                "status": "error", 
+                "success": False,
+                "error": f"Database error: {str(db_error)}",
+                "data": [],
+                "traders": [],
+                "count": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
         
+        # Return real data from database
         return {
             "status": "ok",
             "success": True,
@@ -640,6 +789,8 @@ async def get_traders_endpoint():
             "count": 0,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
+
+
 
 
 @discovery_router.post("/copy/traders")
@@ -709,6 +860,42 @@ async def add_trader_endpoint(request_data: dict):
         
         logger.info(f"Successfully created trader: {trader.id}")
         
+        # INTEGRATION POINT: Start monitoring the new trader
+        global copy_trading_service_manager
+        if copy_trading_system_initialized and copy_trading_service_manager:
+            try:
+                # Get the copy trading service
+                service = copy_trading_service_manager.copy_trading_service
+                if service:
+                    # Add trader to copy trading service
+                    copy_settings = {
+                        "copy_mode": request_data.get("copy_mode", "percentage"),
+                        "copy_percentage": float(request_data.get("copy_percentage", 5.0)),
+                        "max_position_usd": float(request_data.get("max_position_usd", 1000.0)),
+                        "min_trade_value_usd": float(request_data.get("min_trade_value_usd", 50.0)),
+                        "max_slippage_bps": request_data.get("max_slippage_bps", 300),
+                        "allowed_chains": [request_data.get("chain", "ethereum")],
+                        "copy_buy_only": request_data.get("copy_buy_only", False),
+                        "copy_sell_only": request_data.get("copy_sell_only", False)
+                    }
+                    
+                    # Add to monitoring
+                    result = await service.add_trader(
+                        wallet_address=wallet_address,
+                        trader_name=request_data.get("trader_name"),
+                        description=request_data.get("description"),
+                        chain=request_data.get("chain", "ethereum"),
+                        copy_settings=copy_settings
+                    )
+                    
+                    if result["success"]:
+                        logger.info(f"Started monitoring trader {wallet_address[:8]}...")
+                    else:
+                        logger.warning(f"Failed to start monitoring: {result['message']}")
+                        
+            except Exception as monitor_error:
+                logger.error(f"Failed to start monitoring for new trader: {monitor_error}")
+        
         # Return success response with created trader data
         return {
             "status": "ok",
@@ -740,14 +927,6 @@ async def add_trader_endpoint(request_data: dict):
         }
 
 
-
-
-
-
-
-
-
-
 @discovery_router.delete("/copy/traders/{trader_id}")
 async def remove_trader_endpoint(trader_id: str):
     """
@@ -772,6 +951,18 @@ async def remove_trader_endpoint(trader_id: str):
             trader = FollowedTrader.objects.get(id=trader_id)
             trader_name = trader.trader_name
             trader_address = trader.wallet_address
+            
+            # INTEGRATION POINT: Remove from monitoring
+            global copy_trading_service_manager
+            if copy_trading_system_initialized and copy_trading_service_manager:
+                try:
+                    service = copy_trading_service_manager.copy_trading_service
+                    if service:
+                        trader_key = f"{trader.chain}:{trader_address}"
+                        await service.remove_trader(trader_key)
+                        logger.info(f"Removed trader {trader_address[:8]}... from monitoring")
+                except Exception as monitor_error:
+                    logger.error(f"Failed to remove from monitoring: {monitor_error}")
             
             trader.delete()
             
@@ -804,15 +995,116 @@ async def remove_trader_endpoint(trader_id: str):
         }
 
 
+# ============================================================================
+# COPY TRADING STATUS ENDPOINT - Add to existing api_router
+# ============================================================================
+
+@api_router.get("/copy/system/status")
+async def get_copy_trading_system_status():
+    """
+    Get current status of the copy trading system.
+    This endpoint provides detailed system status for debugging.
+    """
+    try:
+        global copy_trading_system_initialized, copy_trading_service_manager
+        
+        if not copy_trading_system_initialized:
+            return {
+                "status": "ok",
+                "copy_trading": {
+                    "available": False,
+                    "initialized": False,
+                    "message": "Copy trading system not initialized"
+                },
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        
+        if copy_trading_service_manager:
+            service_status = copy_trading_service_manager.get_service_status()
+            
+            return {
+                "status": "ok",
+                "copy_trading": {
+                    "available": True,
+                    "initialized": copy_trading_system_initialized,
+                    "service_status": service_status
+                },
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        else:
+            return {
+                "status": "ok",
+                "copy_trading": {
+                    "available": False,
+                    "initialized": copy_trading_system_initialized,
+                    "message": "Service manager not available"
+                },
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+    
+    except Exception as e:
+        logger.error(f"Error getting copy trading system status: {e}")
+        return {
+            "status": "error",
+            "copy_trading": {
+                "available": False,
+                "initialized": False,
+                "error": str(e)
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    
+# Add this to your api_router section in debug_main.py
+
+@api_router.get("/debug/database-traders")
+async def debug_database_traders():
+    """Debug endpoint to see exactly what's in the database."""
+    try:
+        if not ensure_django_setup():
+            return {"error": "Django not configured"}
+        
+        from apps.storage.models import FollowedTrader
+        
+        # Get all traders
+        all_traders = FollowedTrader.objects.all()
+        trader_count = all_traders.count()
+        
+        logger.info(f"Database contains {trader_count} total traders")
+        
+        traders_data = []
+        for trader in all_traders:
+            trader_info = {
+                "id": str(trader.id),
+                "wallet_address": trader.wallet_address,
+                "trader_name": trader.trader_name,
+                "status": trader.status,
+                "created_at": trader.created_at.isoformat(),
+                "allowed_chains": trader.allowed_chains,
+            }
+            traders_data.append(trader_info)
+            logger.info(f"Trader: {trader.trader_name} - {trader.wallet_address}")
+        
+        return {
+            "status": "ok",
+            "database_traders": traders_data,
+            "count": trader_count,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Database debug error: {e}")
+        return {"error": str(e)}    
+
+
+# ============================================================================
+# UPDATE EXISTING get_app() FUNCTION - Modify the existing function
+# ============================================================================
+
 def get_app():
     """
     Factory function for uvicorn import string.
-
-    This function is called by uvicorn when using reload mode
-    with the import string "debug_main:get_app".
-
-    Returns:
-        FastAPI application instance.
+    
+    UPDATED: Now includes copy trading system integration.
     """
     install_missing_dependencies()
 
@@ -826,16 +1118,115 @@ def get_app():
     app.include_router(discovery_router, tags=["discovery"])
     logger.info("Discovery router added to debug app")
     
+    # COPY TRADING INTEGRATION - Add copy trading routes
+    register_copy_trading_routes(app)
+    
+    # Add startup and shutdown events
+    @app.on_event("startup")
+    async def startup_event():
+        """Initialize copy trading system on startup."""
+        logger.info("🚀 FastAPI startup - initializing copy trading system...")
+        result = await initialize_copy_trading_system()
+        
+        if result["success"]:
+            logger.info("✅ Copy trading system startup completed successfully")
+        else:
+            logger.warning(f"⚠️ Copy trading system startup failed: {result['message']}")
+    
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        """Shutdown copy trading system on app shutdown."""
+        logger.info("🛑 FastAPI shutdown - cleaning up copy trading system...")
+        result = await shutdown_copy_trading_system()
+        
+        if result["success"]:
+            logger.info("✅ Copy trading system shutdown completed successfully")
+        else:
+            logger.warning(f"⚠️ Copy trading system shutdown failed: {result['message']}")
+    
+    # Add the copy trading status endpoint to main API router
+    app.include_router(api_router, tags=["debug-api"])
+    
+    logger.info("🎉 Debug app with copy trading system ready!")
+    logger.info("📍 Copy trading status: http://127.0.0.1:8000/api/v1/copy/system/status")
+    logger.info("📍 Copy trading API: http://127.0.0.1:8000/api/v1/copy/")
+    logger.info("🔌 Copy trading WebSocket: ws://127.0.0.1:8000/ws/copy-trading")
+    
     return app
 
+
+
+
+# Add this right after the initialize_copy_trading_system() function
+async def debug_copy_trading_system():
+    """Debug function to check what's happening with copy trading initialization."""
+    try:
+        # Check if dex_django path is correct (not backend)
+        dex_django_path = Path(__file__).parent / "dex_django"
+        logger.info(f"Dex_django path exists: {dex_django_path.exists()}")
+        logger.info(f"Dex_django path contents: {list(dex_django_path.iterdir()) if dex_django_path.exists() else 'Path not found'}")
+        
+        # Check apps directory structure
+        apps_path = dex_django_path / "apps"
+        if apps_path.exists():
+            logger.info(f"Apps directory contents: {list(apps_path.iterdir())}")
+            
+            # Check for services directory
+            services_path = apps_path / "services"
+            logger.info(f"Services directory exists: {services_path.exists()}")
+            if services_path.exists():
+                logger.info(f"Services directory contents: {list(services_path.iterdir())}")
+            
+            # Check for core directory
+            core_path = apps_path / "core"
+            logger.info(f"Core directory exists: {core_path.exists()}")
+            if core_path.exists():
+                logger.info(f"Core directory contents: {list(core_path.iterdir())}")
+        
+        # Try importing components with correct paths
+        try:
+            from dex_django.apps.core.service_manager import service_manager
+            logger.info("✅ Service manager imported successfully")
+        except ImportError as e:
+            logger.error(f"❌ Failed to import service manager: {e}")
+            
+        try:
+            from dex_django.apps.services import copy_trading_service
+            logger.info("✅ Copy trading service imported successfully")
+        except ImportError as e:
+            logger.error(f"❌ Failed to import copy trading service: {e}")
+            
+        try:
+            from dex_django.apps.api.copy_trading_integrated import router
+            logger.info("✅ Copy trading integrated API imported successfully")
+        except ImportError as e:
+            logger.error(f"❌ Failed to import copy trading integrated API: {e}")
+            
+        try:
+            from dex_django.apps.ws.copy_trading import router as ws_router
+            logger.info("✅ Copy trading WebSocket imported successfully")
+        except ImportError as e:
+            logger.error(f"❌ Failed to import copy trading WebSocket: {e}")
+            
+    except Exception as e:
+        logger.error(f"Debug failed: {e}")
+
+
+
+
+
+
+# ============================================================================
+# UPDATE EXISTING main() FUNCTION - Modify the existing function
+# ============================================================================
 
 def main() -> None:
     """
     Main entry point for the debug server.
-
-    Creates and runs the FastAPI debug application with uvicorn.
+    
+    UPDATED: Now includes copy trading system integration.
     """
-    logger.info("Starting DEX Sniper Pro Debug Server...")
+    logger.info("Starting DEX Sniper Pro Debug Server with Copy Trading...")
 
     try:
         # Ensure dependencies are present
@@ -852,6 +1243,8 @@ def main() -> None:
         logger.info("  Reload: %s", reload)
         logger.info("  Docs URL: http://%s:%d/docs", host, port)
         logger.info("  Health Check: http://%s:%d/health", host, port)
+        logger.info("  Copy Trading Status: http://%s:%d/api/v1/copy/system/status", host, port)
+        logger.info("  Copy Trading API: http://%s:%d/api/v1/copy/", host, port)
 
         # Start the server with proper import string for reload mode
         if reload:
@@ -867,6 +1260,27 @@ def main() -> None:
             from dex_django.apps.core.debug_server import create_configured_debug_app
 
             app = create_configured_debug_app()
+            
+            # Add discovery router
+            app.include_router(discovery_router, tags=["discovery"])
+            
+            # Add copy trading integration
+            register_copy_trading_routes(app)
+            
+            # Add startup event for non-reload mode
+            async def startup():
+                result = await initialize_copy_trading_system()
+                if result["success"]:
+                    logger.info("✅ Copy trading system initialized in non-reload mode")
+                else:
+                    logger.warning(f"⚠️ Copy trading initialization failed: {result['message']}")
+            
+            # Run startup manually for non-reload mode
+            try:
+                asyncio.run(startup())
+            except Exception as e:
+                logger.warning(f"Startup task failed: {e}")
+            
             uvicorn.run(
                 app,
                 host=host,
@@ -878,10 +1292,17 @@ def main() -> None:
 
     except KeyboardInterrupt:  # pragma: no cover
         logger.info("Debug server stopped by user")
+        
+        # Cleanup copy trading system
+        if copy_trading_system_initialized:
+            try:
+                asyncio.run(shutdown_copy_trading_system())
+            except Exception as e:
+                logger.error(f"Error during cleanup: {e}")
+    
     except Exception as e:  # noqa: BLE001
         logger.error("Failed to start debug server: %s", e)
         import traceback
-
         logger.error("Full traceback: %s", traceback.format_exc())
         sys.exit(1)
 

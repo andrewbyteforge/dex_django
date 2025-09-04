@@ -157,7 +157,7 @@ export const frontendApi = {
     },
 
     async getFollowedTraders() {
-        return await apiClient.get('/api/v1/frontend/copy-trading/traders');
+        return await apiClient.get('/api/v1/copy/traders');
     },
 
     async getCopyTrades(status = null, limit = 50) {
