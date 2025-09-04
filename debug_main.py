@@ -15,6 +15,7 @@ use it if desired:
 
 from __future__ import annotations
 
+import aiohttp 
 import logging
 import os
 import random
@@ -317,7 +318,7 @@ async def fetch_real_opportunities() -> List[Dict[str, Any]]:
 
 
 
-
+api_router = APIRouter(prefix="/api/v1")
 
 
 def calculate_opportunity_score(opp: Dict[str, Any]) -> float:
@@ -641,14 +642,16 @@ async def get_traders_endpoint():
         }
 
 
-@api_router.post("/copy/traders")
+@discovery_router.post("/copy/traders")
 async def add_trader_endpoint(request_data: dict):
     """Add a new trader to copy trading system with proper field mapping."""
     try:
-        # Import FollowedTrader model
-        from dex_django.apps.storage.models import FollowedTrader
+        # Import required modules
+        from apps.storage.models import FollowedTrader
         from decimal import Decimal
         from django.utils import timezone
+        from asgiref.sync import sync_to_async
+        import asyncio
         
         logger.info(f"Adding trader with data: {request_data}")
         
@@ -657,8 +660,17 @@ async def add_trader_endpoint(request_data: dict):
         if not wallet_address or not wallet_address.startswith("0x") or len(wallet_address) != 42:
             return {"status": "error", "error": "Invalid wallet address"}
         
-        # Check if trader already exists
-        if FollowedTrader.objects.filter(wallet_address=wallet_address).exists():
+        # Use sync_to_async to handle Django ORM operations
+        @sync_to_async
+        def check_trader_exists(address):
+            return FollowedTrader.objects.filter(wallet_address=address).exists()
+        
+        @sync_to_async  
+        def create_trader(trader_data):
+            return FollowedTrader.objects.create(**trader_data)
+        
+        # Check if trader already exists (async)
+        if await check_trader_exists(wallet_address):
             return {"status": "error", "error": "Trader is already being followed"}
         
         # Map frontend fields to FollowedTrader model fields
@@ -688,13 +700,12 @@ async def add_trader_endpoint(request_data: dict):
             "copy_buy_only": request_data.get("copy_buy_only", False),
             "copy_sell_only": request_data.get("copy_sell_only", False),
             
-            # Trade size filters
-            "min_trade_usd": Decimal(str(request_data.get("min_trade_usd", 100.0))),
+            # Trade size filters (fixing duplicate field names)
             "max_trade_usd": Decimal(str(request_data.get("max_trade_usd", 50000.0))),
         }
         
-        # Create the trader
-        trader = FollowedTrader.objects.create(**trader_data)
+        # Create the trader (async)
+        trader = await create_trader(trader_data)
         
         logger.info(f"Successfully created trader: {trader.id}")
         
@@ -729,11 +740,6 @@ async def add_trader_endpoint(request_data: dict):
         }
 
 
-# Alternative endpoint that handles the exact same functionality
-@api_router.post("/copy/traders")
-async def add_trader_endpoint_alt(request_data: dict):
-    """Alternative add trader endpoint (same functionality as above)."""
-    return await add_trader_endpoint(request_data)
 
 
 
