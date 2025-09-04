@@ -12,11 +12,11 @@ from enum import Enum
 
 import httpx
 
-from backend.app.storage.copy_trading_repo import create_copy_trading_repositories
-from backend.app.storage.copy_trading_models import ChainType, WalletStatus, CopyMode
-from backend.app.copy_trading.copy_trading_coordinator import copy_trading_coordinator
-from backend.app.core.database import get_db
-from backend.app.core.runtime_state import runtime_state
+from dex_django.storage.copy_trading_repo import create_copy_trading_repositories
+from dex_django.storage.copy_trading_models import ChainType, WalletStatus, CopyMode
+from dex_django.copy_trading.copy_trading_coordinator import copy_trading_coordinator
+from dex_django.core.database import get_db
+from dex_django.core.runtime_state import runtime_state
 
 logger = logging.getLogger("discovery.wallet_discovery")
 

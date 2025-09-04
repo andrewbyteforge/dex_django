@@ -6,9 +6,9 @@ import asyncio
 import logging
 from typing import Dict, Any
 
-from backend.app.core.database import init_db
-from backend.app.core.data_seeder import copy_trading_seeder
-from backend.app.copy_trading.copy_trading_coordinator import copy_trading_coordinator
+from dex_django.core.database import init_db
+from dex_django.core.data_seeder import copy_trading_seeder
+from dex_django.copy_trading.copy_trading_coordinator import copy_trading_coordinator
 
 logger = logging.getLogger("core.startup")
 

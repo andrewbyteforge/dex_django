@@ -77,7 +77,7 @@ async def initialize_copy_trading_system():
             sys.path.insert(0, str(dex_django_path))
             logger.info(f"Added dex_django path: {dex_django_path}")
         
-        # FIXED: Import from dex_django.apps instead of backend.app
+        # FIXED: Import from dex_django.apps instead of dex_django
         from dex_django.apps.core.service_manager import service_manager
         copy_trading_service_manager = service_manager
         

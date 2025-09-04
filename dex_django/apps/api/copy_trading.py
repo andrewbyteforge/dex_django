@@ -10,15 +10,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel, Field, validator
 
-from backend.app.discovery.wallet_monitor import wallet_monitor
-from backend.app.strategy.copy_trading_strategy import copy_trading_strategy
-from backend.app.core.runtime_state import runtime_state
-from backend.app.copy_trading.wallet_tracker import (
-    WalletTracker,
-    ChainType,
-    WalletStatus,
-    WalletTransaction
-)
+from dex_django.apps.discovery.wallet_monitor import wallet_monitor
+from dex_django.apps.strategy.copy_trading_strategy import copy_trading_strategy
+from dex_django.apps.strategy.trader_performance_tracker import trader_performance_tracker
+from dex_django.apps.trading.live_executor import live_executor
+from dex_django.apps.core.runtime_state import runtime_state
 
 router = APIRouter(prefix="/api/v1/copy", tags=["copy-trading"])
 
@@ -36,7 +32,7 @@ class AddFollowedTraderRequest(BaseModel):
     chain: str = Field("ethereum", description="Chain to monitor (ethereum, bsc, base, polygon)")
     
     # Copy settings
-    copy_mode: str = Field("percentage", regex="^(percentage|fixed_amount|proportional)$")
+    copy_mode: str = Field("percentage", pattern="^(percentage|fixed_amount|proportional)$")
     copy_percentage: Decimal = Field(Decimal("5.0"), ge=0.1, le=50.0)
     fixed_amount_usd: Optional[Decimal] = Field(None, ge=10.0, le=10000.0)
     
@@ -79,11 +75,10 @@ class UpdateFollowedTraderRequest(BaseModel):
     
     trader_name: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
-    status: Optional[str] = Field(None, regex="^(active|paused|blacklisted)$")
+    status: Optional[str] = Field(None, pattern="^(active|paused|blacklisted)$") 
     
     # Copy settings
-    copy_mode: Optional[str] = Field(None, regex="^(percentage|fixed_amount|proportional)$")
-    copy_percentage: Optional[Decimal] = Field(None, ge=0.1, le=50.0)
+    copy_mode: Optional[str] = Field(None, pattern="^(percentage|fixed_amount|proportional)$")
     fixed_amount_usd: Optional[Decimal] = Field(None, ge=10.0, le=10000.0)
     
     # Risk controls

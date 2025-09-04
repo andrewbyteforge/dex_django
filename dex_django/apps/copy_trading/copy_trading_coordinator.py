@@ -8,18 +8,18 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Set
 from decimal import Decimal
 
-from backend.app.copy_trading.wallet_tracker import (
+from dex_django.copy_trading.wallet_tracker import (
     WalletTracker, WalletTransaction, ChainType, WalletStatus, TrackedWallet
 )
-from backend.app.strategy.copy_trading_strategy import (
+from dex_django.strategy.copy_trading_strategy import (
     CopyTradingStrategy, copy_trading_strategy
 )
-from backend.app.storage.copy_trading_repo import create_copy_trading_repositories
-from backend.app.storage.copy_trading_models import (
+from dex_django.storage.copy_trading_repo import create_copy_trading_repositories
+from dex_django.storage.copy_trading_models import (
     TrackedWallet as DBTrackedWallet, DetectedTransaction, CopyTradeStatus
 )
-from backend.app.core.runtime_state import runtime_state
-from backend.app.core.database import get_db
+from dex_django.core.runtime_state import runtime_state
+from dex_django.core.database import get_db
 
 logger = logging.getLogger("copy_trading.coordinator")
 

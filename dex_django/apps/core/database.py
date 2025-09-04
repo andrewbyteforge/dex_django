@@ -36,7 +36,7 @@ async def init_db() -> None:
     """Initialize database tables."""
     try:
         # Import all models to ensure they're registered
-        from backend.app.models import trading, discovery  # noqa: F401
+        from dex_django.models import trading, discovery  # noqa: F401
         
         # Create tables
         async with engine.begin() as conn:

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from backend.app.core.runtime_state import runtime_state
+from dex_django.core.runtime_state import runtime_state
 
 router = APIRouter(tags=["ws-paper"])
 

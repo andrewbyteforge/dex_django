@@ -15,10 +15,10 @@ from web3.exceptions import ContractLogicError, TransactionNotFound
 from eth_account import Account
 from eth_account.signers.local import LocalAccount
 
-from backend.app.dex.uniswap_v2 import UniswapV2Adapter
-from backend.app.dex.uniswap_v3 import UniswapV3Adapter
-from backend.app.chains.evm_client import EvmClient
-from backend.app.core.runtime_state import runtime_state
+from dex_django.dex.uniswap_v2 import UniswapV2Adapter
+from dex_django.dex.uniswap_v3 import UniswapV3Adapter
+from dex_django.chains.evm_client import EvmClient
+from dex_django.core.runtime_state import runtime_state
 
 logger = logging.getLogger("trading.live_executor")
 

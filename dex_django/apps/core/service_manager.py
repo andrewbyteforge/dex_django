@@ -142,7 +142,7 @@ class ServiceManager:
     async def _initialize_copy_trading_service(self) -> None:
         """Initialize the main CopyTradingService."""
         try:
-            from backend.app.services import copy_trading_service, COPY_TRADING_SERVICE_AVAILABLE
+            from dex_django.services import copy_trading_service, COPY_TRADING_SERVICE_AVAILABLE
             
             if not COPY_TRADING_SERVICE_AVAILABLE:
                 raise ImportError("CopyTradingService not available")
@@ -158,7 +158,7 @@ class ServiceManager:
         """Initialize WalletMonitor for transaction detection."""
         try:
             # Try to import existing wallet monitor
-            from backend.app.discovery.wallet_monitor import wallet_monitor
+            from dex_django.discovery.wallet_monitor import wallet_monitor
             self.wallet_monitor = wallet_monitor
             logger.info("✅ WalletMonitor initialized")
             
@@ -171,7 +171,7 @@ class ServiceManager:
     async def _initialize_copy_strategy(self) -> None:
         """Initialize CopyTradingStrategy for decision making."""
         try:
-            from backend.app.strategy.copy_trading_strategy import copy_trading_strategy
+            from dex_django.strategy.copy_trading_strategy import copy_trading_strategy
             self.copy_strategy = copy_trading_strategy
             logger.info("✅ CopyTradingStrategy initialized")
             
@@ -184,7 +184,7 @@ class ServiceManager:
     async def _initialize_websocket_hub(self) -> None:
         """Initialize WebSocket hub for real-time updates."""
         try:
-            from backend.app.ws.copy_trading import copy_trading_hub
+            from dex_django.ws.copy_trading import copy_trading_hub
             self.websocket_hub = copy_trading_hub
             logger.info("✅ WebSocket Hub initialized")
             
@@ -211,7 +211,7 @@ class ServiceManager:
     async def _initialize_api_endpoints(self) -> None:
         """Initialize API endpoints with services."""
         try:
-            from backend.app.api.copy_trading_integrated import initialize_copy_trading_api
+            from dex_django.api.copy_trading_integrated import initialize_copy_trading_api
             initialize_copy_trading_api(self.copy_trading_service)
             logger.info("✅ API endpoints initialized")
             

@@ -67,7 +67,7 @@ class AddTraderRequest(BaseModel):
     chain: str = Field("ethereum")
     
     # Copy settings
-    copy_mode: str = Field("percentage", regex="^(percentage|fixed)$")
+    copy_mode: str = Field("percentage", pattern="^(percentage|fixed)$")
     copy_percentage: float = Field(3.0, ge=0.1, le=50.0)
     fixed_amount_usd: Optional[float] = Field(None, ge=10.0, le=10000.0)
     

@@ -8,11 +8,11 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
 
-from backend.app.discovery.wallet_monitor import wallet_monitor, WalletTransaction
-from backend.app.strategy.copy_trading_strategy import copy_trading_strategy
-from backend.app.strategy.trader_performance_tracker import trader_performance_tracker
-from backend.app.trading.live_executor import live_executor
-from backend.app.core.runtime_state import runtime_state
+from dex_django.discovery.wallet_monitor import wallet_monitor, WalletTransaction
+from dex_django.strategy.copy_trading_strategy import copy_trading_strategy
+from dex_django.strategy.trader_performance_tracker import trader_performance_tracker
+from dex_django.trading.live_executor import live_executor
+from dex_django.core.runtime_state import runtime_state
 
 logger = logging.getLogger("copy_trading.coordinator")
 

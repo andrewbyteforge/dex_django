@@ -25,7 +25,7 @@ class ProviderCreate(BaseModel):
     """Provider creation request."""
     name: str = Field(..., min_length=1, max_length=100)
     url: str = Field(..., min_length=1, max_length=500)
-    kind: str = Field(..., regex="^(rpc|websocket|graphql)$")
+    kind: str = Field(..., pattern="^(rpc|websocket|graphql)$")
     enabled: bool = True
 
 

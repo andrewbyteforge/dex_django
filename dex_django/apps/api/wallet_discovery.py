@@ -10,10 +10,10 @@ from decimal import Decimal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, validator
 
-from backend.app.discovery.wallet_discovery_engine import (
+from dex_django.discovery.wallet_discovery_engine import (
     wallet_discovery_engine, WalletCandidate, DiscoverySource, ChainType
 )
-from backend.app.core.runtime_state import runtime_state
+from dex_django.core.runtime_state import runtime_state
 
 router = APIRouter(prefix="/api/v1/discovery", tags=["wallet-discovery"])
 logger = logging.getLogger("api.wallet_discovery")

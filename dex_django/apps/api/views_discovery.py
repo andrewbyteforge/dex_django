@@ -13,7 +13,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 # Import will be fixed - need to create a sync version
-# from backend.app.discovery.engine import discovery_engine
+# from dex_django.discovery.engine import discovery_engine
 
 
 @api_view(["GET"])

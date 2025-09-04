@@ -7,7 +7,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from backend.app.core.runtime_state import runtime_state
+from dex_django.core.runtime_state import runtime_state
 
 router = APIRouter(prefix="/api/v1", tags=["paper"])
 

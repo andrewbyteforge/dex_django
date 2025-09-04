@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Dict, List, Any
 from datetime import datetime
 
-# FIXED IMPORTS - Remove backend.app. prefix since we're in dex_django/apps/
+# FIXED IMPORTS - Remove dex_django. prefix since we're in dex_django/apps/
 try:
     from apps.storage.copy_trading_repo import create_copy_trading_repositories
     from apps.storage.copy_trading_models import ChainType, WalletStatus, CopyMode

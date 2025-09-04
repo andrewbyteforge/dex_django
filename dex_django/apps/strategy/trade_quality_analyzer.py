@@ -10,8 +10,8 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
-from backend.app.storage.copy_trading_repo import create_copy_trading_repositories
-from backend.app.core.database import get_db
+from dex_django.storage.copy_trading_repo import create_copy_trading_repositories
+from dex_django.core.database import get_db
 
 logger = logging.getLogger("strategy.trade_quality")
 

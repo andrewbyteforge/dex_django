@@ -10,6 +10,10 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel, Field, validator
 
+from dex_django.apps.discovery.wallet_monitor import wallet_monitor
+from dex_django.apps.strategy.copy_trading_strategy import copy_trading_strategy
+from dex_django.apps.core.runtime_state import runtime_state
+
 logger = logging.getLogger("api.copy_trading_integrated")
 
 # Router
@@ -36,7 +40,7 @@ class AddTraderRequest(BaseModel):
     chain: str = Field("ethereum")
     
     # Copy settings
-    copy_mode: str = Field("percentage", regex="^(percentage|fixed_amount|proportional)$")
+    copy_mode: str = Field("percentage", pattern="^(percentage|fixed_amount|proportional)$")
     copy_percentage: Decimal = Field(Decimal("5.0"), ge=0.1, le=50.0)
     fixed_amount_usd: Optional[Decimal] = Field(None, ge=10.0, le=10000.0)
     

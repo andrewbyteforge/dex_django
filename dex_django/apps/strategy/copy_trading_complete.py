@@ -10,11 +10,12 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Depends, BackgroundTasks
 from pydantic import BaseModel, Field, validator
 
-from backend.app.discovery.wallet_monitor import wallet_monitor
-from backend.app.strategy.copy_trading_strategy import copy_trading_strategy
-from backend.app.strategy.trader_performance_tracker import trader_performance_tracker
-from backend.app.trading.live_executor import live_executor
-from backend.app.core.runtime_state import runtime_state
+from dex_django.discovery.wallet_monitor import wallet_monitor
+from dex_django.strategy.copy_trading_strategy import copy_trading_strategy
+from dex_django.strategy.trader_performance_tracker import trader_performance_tracker
+from dex_django.trading.live_executor import live_executor
+from dex_django.core.runtime_state import runtime_state
+import aysncio
 
 router = APIRouter(prefix="/api/v1/copy", tags=["copy-trading"])
 logger = logging.getLogger("api.copy_trading")
@@ -29,7 +30,7 @@ class AddTraderRequest(BaseModel):
     chain: str = Field("ethereum")
     
     # Copy settings
-    copy_mode: str = Field("percentage", regex="^(percentage|fixed_amount|proportional)$")
+    copy_mode: str = Field("percentage", pattern="^(percentage|fixed_amount|proportional)$")
     copy_percentage: Decimal = Field(Decimal("5.0"), ge=0.1, le=50.0)
     fixed_amount_usd: Optional[Decimal] = Field(None, ge=10.0, le=10000.0)
     
@@ -449,7 +450,7 @@ async def simulate_copy_trade(
     """Simulate a copy trade without executing it."""
     try:
         # Create mock wallet transaction for simulation
-        from backend.app.discovery.wallet_monitor import WalletTransaction
+        from dex_django.discovery.wallet_monitor import WalletTransaction
         
         mock_tx = WalletTransaction(
             tx_hash="0xsimulation",

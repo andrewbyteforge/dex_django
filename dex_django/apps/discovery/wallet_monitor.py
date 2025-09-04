@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Optional, Set
 import httpx
 from pydantic import BaseModel, Field
 
-from backend.app.chains.evm_client import EvmClient
-from backend.app.core.runtime_state import runtime_state
+from dex_django.apps.chains.evm_client import EvmClient  
+from dex_django.apps.core.runtime_state import runtime_state
 
 logger = logging.getLogger(__name__)
 
@@ -450,7 +450,7 @@ class WalletMonitor:
         """
         try:
             # Import copy trading strategy here to avoid circular imports
-            from backend.app.strategy.copy_trading_strategy import copy_trading_strategy
+            from dex_django.strategy.copy_trading_strategy import copy_trading_strategy
             
             # Get trader config (would be from database in production)
             trader_config = {
