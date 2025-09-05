@@ -8,7 +8,6 @@ import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
-import httpx
 import requests
 from django.core.cache import cache
 from django.utils import timezone
@@ -99,7 +98,7 @@ def refresh_opportunities(request) -> Response:
             }
         )
 
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error(
             "[%s] Failed to refresh opportunities: %s", trace_id, exc, exc_info=True
         )
@@ -110,15 +109,59 @@ def refresh_opportunities(request) -> Response:
 
 
 def _fetch_live_opportunities_sync(trace_id: str = "unknown") -> List[Dict[str, Any]]:
-    """Fetch opportunities from multiple real DEX data sources (synchronous version)."""
+    """Fetch opportunities from multiple real DEX data sources - NO MOCK DATA."""
     opportunities = []
     
     logger.info(f"[{trace_id}] Starting multi-source DEX data fetch")
     
-    # Method 1: DexScreener trending pairs (REAL DATA)
+    # Method 1: DexScreener trending pairs across multiple chains
+    chains_to_fetch = ["ethereum", "bsc", "base", "polygon", "solana"]
+    
+    for chain in chains_to_fetch:
+        try:
+            if chain == "solana":
+                url = "https://api.dexscreener.com/latest/dex/pairs/solana"
+            else:
+                url = f"https://api.dexscreener.com/latest/dex/pairs/{chain}"
+            
+            logger.info(f"[{trace_id}] Fetching DexScreener {chain}: {url}")
+            
+            response = requests.get(url, timeout=15)
+            
+            if response.status_code == 200:
+                data = response.json()
+                pairs = data.get("pairs", [])
+                
+                # Filter for high-quality pairs only
+                quality_pairs = []
+                for pair in pairs:
+                    liquidity_data = pair.get("liquidity", {})
+                    if isinstance(liquidity_data, dict):
+                        liquidity_usd = float(liquidity_data.get("usd", 0))
+                    else:
+                        liquidity_usd = float(liquidity_data) if liquidity_data else 0
+                    
+                    # Only include pairs with significant liquidity
+                    if liquidity_usd >= 10000:
+                        quality_pairs.append(pair)
+                
+                # Process top quality pairs for this chain
+                for pair in quality_pairs[:25]:  # Top 25 per chain (increased from 15)
+                    opportunity = _process_dexscreener_pair(pair, trace_id)
+                    if opportunity:
+                        opportunities.append(opportunity)
+                        
+                logger.info(f"[{trace_id}] {chain}: Added {len([o for o in opportunities if o.get('chain') == chain])} opportunities")
+            else:
+                logger.error(f"[{trace_id}] DexScreener {chain} API error: {response.status_code}")
+        
+        except Exception as e:
+            logger.error(f"[{trace_id}] DexScreener {chain} failed: {e}")
+    
+    # Method 2: DexScreener trending tokens endpoint
     try:
         url = "https://api.dexscreener.com/latest/dex/tokens/trending"
-        logger.info(f"[{trace_id}] Fetching DexScreener trending: {url}")
+        logger.info(f"[{trace_id}] Fetching DexScreener trending tokens")
         
         response = requests.get(url, timeout=15)
         
@@ -140,46 +183,8 @@ def _fetch_live_opportunities_sync(trace_id: str = "unknown") -> List[Dict[str, 
     except Exception as e:
         logger.error(f"[{trace_id}] DexScreener trending failed: {e}")
     
-    # Method 2: DexScreener new pairs (REAL DATA)
-    try:
-        # Get recently created pairs
-        url = "https://api.dexscreener.com/latest/dex/pairs/ethereum"
-        logger.info(f"[{trace_id}] Fetching DexScreener new pairs")
-        
-        response = requests.get(url, timeout=15)
-        
-        if response.status_code == 200:
-            data = response.json()
-            pairs = data.get("pairs", [])
-            
-            # Filter for recently created pairs with decent liquidity
-            recent_pairs = []
-            for pair in pairs:
-                liquidity_data = pair.get("liquidity", {})
-                if isinstance(liquidity_data, dict):
-                    liquidity_usd = float(liquidity_data.get("usd", 0))
-                else:
-                    liquidity_usd = float(liquidity_data) if liquidity_data else 0
-                    
-                if liquidity_usd >= 10000:  # Minimum liquidity filter
-                    recent_pairs.append(pair)
-            
-            # Sort by liquidity and take top 10
-            recent_pairs.sort(key=lambda x: float(x.get("liquidity", {}).get("usd", 0)) if isinstance(x.get("liquidity"), dict) else float(x.get("liquidity", 0)), reverse=True)
-            
-            for pair in recent_pairs[:10]:
-                opportunity = _process_dexscreener_pair(pair, trace_id)
-                if opportunity:
-                    opportunities.append(opportunity)
-                    
-            logger.info(f"[{trace_id}] DexScreener new pairs added {len(recent_pairs)} opportunities")
-    
-    except Exception as e:
-        logger.error(f"[{trace_id}] DexScreener new pairs failed: {e}")
-    
     # Method 3: Jupiter API for Solana (REAL DATA)
     try:
-        # Get popular tokens from Jupiter
         url = "https://token.jup.ag/strict"
         logger.info(f"[{trace_id}] Fetching Jupiter token list")
         
@@ -205,7 +210,9 @@ def _fetch_live_opportunities_sync(trace_id: str = "unknown") -> List[Dict[str, 
                         "block_number": 0,
                         "initial_reserve0": 0,
                         "initial_reserve1": 0,
-                        "source": "jupiter"
+                        "source": "jupiter",
+                        "volume_24h": 0,
+                        "price_change_24h": 0
                     }
                     opportunities.append(opportunity)
                     
@@ -243,7 +250,9 @@ def _fetch_live_opportunities_sync(trace_id: str = "unknown") -> List[Dict[str, 
                         "block_number": 0,
                         "initial_reserve0": 0,
                         "initial_reserve1": 0,
-                        "source": "coingecko_trending"
+                        "source": "coingecko_trending",
+                        "volume_24h": 0,
+                        "price_change_24h": 0
                     }
                     opportunities.append(opportunity)
                     
@@ -256,23 +265,10 @@ def _fetch_live_opportunities_sync(trace_id: str = "unknown") -> List[Dict[str, 
     except Exception as e:
         logger.error(f"[{trace_id}] CoinGecko trending failed: {e}")
     
-    # REMOVE MOCK DATA - Only use if no real data was fetched
+    # No fallback/mock data - if all sources fail, return empty list
     if len(opportunities) == 0:
-        logger.warning(f"[{trace_id}] No real data fetched, adding minimal fallback")
-        fallback_opportunity = {
-            "chain": "ethereum",
-            "dex": "uniswap_v3", 
-            "pair_address": "0x0000000000000000000000000000000000000000",
-            "token0_symbol": "NO_DATA",
-            "token1_symbol": "WETH",
-            "estimated_liquidity_usd": 0,
-            "timestamp": datetime.now().isoformat(),
-            "block_number": 0,
-            "initial_reserve0": 0,
-            "initial_reserve1": 0,
-            "source": "fallback"
-        }
-        opportunities.append(fallback_opportunity)
+        logger.warning(f"[{trace_id}] No real data available from any source")
+        return []
     
     # Score and sort all opportunities
     for opp in opportunities:
@@ -379,9 +375,7 @@ def _determine_risk_level(opportunity: Dict[str, Any]) -> str:
         elif score < 7:
             risk_score += 1
             
-        if source in ["fallback", "mock"]:
-            risk_score += 3
-        elif source not in ["dexscreener", "uniswap_v3", "jupiter"]:
+        if source not in ["dexscreener", "uniswap_v3", "jupiter"]:
             risk_score += 1
         
         # Determine final risk level
@@ -523,7 +517,6 @@ def _calculate_opportunity_score(opportunity: Dict[str, Any]) -> float:
         "pancakeswap": 2,
         "quickswap": 2,
         "jupiter": 2,
-        "mock": 0,
     }
     score += source_scores.get(source, 1)
 
@@ -537,7 +530,7 @@ def _calculate_opportunity_score(opportunity: Dict[str, Any]) -> float:
                 score += 2
             elif age_m <= 30:
                 score += 1
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     # Penalties
@@ -706,7 +699,7 @@ def analyze_opportunity(request) -> Response:
             }
         )
 
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error("[%s] Enhanced analysis failed: %s", trace_id, exc, exc_info=True)
         return Response(
             {
@@ -1319,36 +1312,3 @@ def _generate_recommendation_rationale(
         rationale_parts.append("Lower confidence due to limited data or conflicting signals.")
     
     return " ".join(rationale_parts)
-
-
-def _generate_realistic_mock_data() -> List[Dict[str, Any]]:
-    """Generate realistic mock opps (dev)."""
-    import random
-
-    chains = ["ethereum", "bsc", "polygon", "base"]
-    dexes = ["uniswap_v2", "uniswap_v3", "pancakeswap_v2", "quickswap"]
-    base_tokens = ["WETH", "USDC", "USDT", "WBNB", "MATIC"]
-    new_tokens = ["PEPE2", "CHAD", "DEGEN", "MOON", "ROCKET"]
-
-    out: List[Dict[str, Any]] = []
-    for _ in range(8):
-        chain = random.choice(chains)
-        dex = random.choice(dexes)
-        base = random.choice(base_tokens)
-        new = random.choice(new_tokens)
-        out.append(
-            {
-                "chain": chain,
-                "dex": dex,
-                "pair_address": f"0x{''.join(random.choices('0123456789abcdef', k=40))}",
-                "token0_symbol": new,
-                "token1_symbol": base,
-                "estimated_liquidity_usd": random.randint(5_000, 200_000),
-                "timestamp": datetime.now().isoformat(),
-                "block_number": random.randint(18_000_000, 19_000_000),
-                "initial_reserve0": random.randint(1_000, 100_000),
-                "initial_reserve1": random.randint(5_000, 200_000),
-                "source": "mock",
-            }
-        )
-    return out

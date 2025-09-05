@@ -685,6 +685,31 @@ def get_app():
 
         # Import here so path/logging is configured first
         from dex_django.apps.core.debug_server import create_configured_debug_app
+        
+        # Add debug logging for WebSocket import
+        try:
+            logger.info("🔍 Attempting to import WebSocket router...")
+            from dex_django.apps.ws.debug_websockets import router as ws_router
+            logger.info("✅ WebSocket router import successful")
+            logger.info(f"WebSocket router type: {type(ws_router)}")
+            
+            # Check if router has routes
+            if hasattr(ws_router, 'routes'):
+                logger.info(f"WebSocket router has {len(ws_router.routes)} routes")
+                for route in ws_router.routes:
+                    logger.info(f"  - Route: {route.path} ({type(route).__name__})")
+            else:
+                logger.warning("⚠️ WebSocket router has no routes attribute")
+                
+        except Exception as import_error:
+            logger.error(f"❌ WebSocket router import failed: {import_error}")
+            logger.error(f"Import error type: {type(import_error)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            # Create a dummy router to prevent the app from crashing
+            from fastapi import APIRouter
+            ws_router = APIRouter()
+            logger.info("Created dummy WebSocket router as fallback")
 
         # Create the app from the factory
         app = create_configured_debug_app()
@@ -696,6 +721,22 @@ def get_app():
         # Add API router for copy trading status
         app.include_router(api_router, tags=["debug-api"])
         logger.info("API router added to debug app")
+        
+        # Add WebSocket router for real-time connections with debug logging
+        try:
+            logger.info("🔍 Attempting to include WebSocket router in app...")
+            app.include_router(ws_router, tags=["websockets"])
+            logger.info("✅ WebSocket router successfully included in debug app")
+            
+            # Log all routes after inclusion
+            logger.info("📋 All app routes after WebSocket inclusion:")
+            for route in app.routes:
+                logger.info(f"  - {route.path} ({type(route).__name__})")
+                
+        except Exception as router_error:
+            logger.error(f"❌ Failed to include WebSocket router: {router_error}")
+            import traceback
+            logger.error(f"Router inclusion traceback: {traceback.format_exc()}")
         
         # COPY TRADING INTEGRATION - Add copy trading routes
         register_copy_trading_routes(app)
@@ -736,8 +777,6 @@ def get_app():
         import traceback
         logger.error(f"Full traceback: {traceback.format_exc()}")
         raise
-
-
 # ============================================================================
 # MAIN ENTRY POINT
 # ============================================================================

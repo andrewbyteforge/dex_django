@@ -16,6 +16,7 @@ from dex_django.apps.core.debug_state import debug_state
 router = APIRouter()
 logger = logging.getLogger("ws.debug")
 
+print(f"DEBUG: Router routes count: {len(router.routes)}")
 
 @router.websocket("/ws/paper")
 async def paper_trading_websocket(
@@ -58,29 +59,59 @@ async def paper_trading_websocket(
     try:
         await websocket.send_json(welcome_msg)
         
-        # Keep connection alive and handle incoming messages
+        # Heartbeat and connection management
+        last_ping = datetime.now(timezone.utc)
+        ping_interval = 30  # seconds
+        
+        # Keep connection alive with non-blocking message handling
         while True:
             try:
-                # Wait for messages from client
-                message = await websocket.receive_json()
-                await handle_paper_websocket_message(websocket, client_id, message)
+                # Use asyncio.wait_for with timeout to avoid blocking indefinitely
+                try:
+                    message = await asyncio.wait_for(
+                        websocket.receive_json(), 
+                        timeout=1.0  # 1 second timeout
+                    )
+                    await handle_paper_websocket_message(websocket, client_id, message)
+                    
+                except asyncio.TimeoutError:
+                    # No message received - this is normal, continue with heartbeat
+                    pass
+                
+                # Send periodic ping to keep connection alive
+                current_time = datetime.now(timezone.utc)
+                if (current_time - last_ping).total_seconds() >= ping_interval:
+                    ping_msg = {
+                        "type": "ping",
+                        "timestamp": current_time.isoformat(),
+                        "payload": {"client_id": client_id}
+                    }
+                    await websocket.send_json(ping_msg)
+                    last_ping = current_time
+                    
+                # Small sleep to prevent busy loop
+                await asyncio.sleep(0.1)
                 
             except WebSocketDisconnect:
                 logger.info(f"Paper trading WebSocket disconnected: {client_id}")
                 break
                 
             except Exception as e:
-                logger.error(f"Error handling paper WebSocket message from {client_id}: {e}")
+                logger.error(f"Error in paper WebSocket loop for {client_id}: {e}")
                 # Send error response to client
-                error_msg = {
-                    "type": "error",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "payload": {
-                        "error": str(e),
-                        "client_id": client_id
+                try:
+                    error_msg = {
+                        "type": "error",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "payload": {
+                            "error": str(e),
+                            "client_id": client_id
+                        }
                     }
-                }
-                await websocket.send_json(error_msg)
+                    await websocket.send_json(error_msg)
+                except:
+                    # If we can't send error message, connection is dead
+                    break
                 
     except WebSocketDisconnect:
         logger.info(f"Paper trading WebSocket disconnected: {client_id}")
@@ -124,18 +155,59 @@ async def metrics_websocket(
     try:
         await websocket.send_json(initial_metrics)
         
-        # Keep connection alive and handle incoming requests
+        # Heartbeat and connection management
+        last_ping = datetime.now(timezone.utc)
+        ping_interval = 30  # seconds
+        
+        # Keep connection alive with non-blocking message handling
         while True:
             try:
-                message = await websocket.receive_json()
-                await handle_metrics_websocket_message(websocket, client_id, message)
+                # Use asyncio.wait_for with timeout to avoid blocking indefinitely
+                try:
+                    message = await asyncio.wait_for(
+                        websocket.receive_json(), 
+                        timeout=1.0  # 1 second timeout
+                    )
+                    await handle_metrics_websocket_message(websocket, client_id, message)
+                    
+                except asyncio.TimeoutError:
+                    # No message received - this is normal, continue with heartbeat
+                    pass
+                
+                # Send periodic ping to keep connection alive
+                current_time = datetime.now(timezone.utc)
+                if (current_time - last_ping).total_seconds() >= ping_interval:
+                    ping_msg = {
+                        "type": "ping",
+                        "timestamp": current_time.isoformat(),
+                        "payload": {"client_id": client_id}
+                    }
+                    await websocket.send_json(ping_msg)
+                    last_ping = current_time
+                    
+                # Small sleep to prevent busy loop
+                await asyncio.sleep(0.1)
                 
             except WebSocketDisconnect:
                 logger.info(f"Metrics WebSocket disconnected: {client_id}")
                 break
                 
             except Exception as e:
-                logger.error(f"Error handling metrics WebSocket message from {client_id}: {e}")
+                logger.error(f"Error in metrics WebSocket loop for {client_id}: {e}")
+                # Send error response to client
+                try:
+                    error_msg = {
+                        "type": "error",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "payload": {
+                            "error": str(e),
+                            "client_id": client_id
+                        }
+                    }
+                    await websocket.send_json(error_msg)
+                except:
+                    # If we can't send error message, connection is dead
+                    break
                 
     except WebSocketDisconnect:
         logger.info(f"Metrics WebSocket disconnected: {client_id}")
@@ -143,6 +215,9 @@ async def metrics_websocket(
         logger.error(f"Metrics WebSocket error for {client_id}: {e}")
     finally:
         debug_state.remove_metrics_client(websocket)
+
+
+
 
 
 async def handle_paper_websocket_message(

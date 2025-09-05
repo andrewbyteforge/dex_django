@@ -4,7 +4,7 @@ import { useDjangoData, djangoApi } from '../hooks/useDjangoApi';
 
 export function LiveOpportunitiesCard() {
     // ===========================================
-    // STATE MANAGEMENT
+    // STATE MANAGEMENT - Component internal state
     // ===========================================
     const [autoRefresh, setAutoRefresh] = useState(true);
     const [lastUpdate, setLastUpdate] = useState(null);
@@ -14,26 +14,36 @@ export function LiveOpportunitiesCard() {
     const [showAnalysisModal, setShowAnalysisModal] = useState(false);
     const refreshIntervalRef = useRef(null);
 
-    // Filter states - controls which opportunities to show
+    // FILTER STATES - Controls which opportunities to show
+    // Updated with comprehensive DEX list including all missing ones from backend
     const [filters, setFilters] = useState({
         minScore: 0,
         maxScore: 30,
         minLiquidity: 0,
-        maxLiquidity: 10000000,  // Increased to 10M to catch high liquidity opportunities
+        maxLiquidity: 10000000,  // 10M to catch high liquidity opportunities
         selectedChains: new Set(['ethereum', 'bsc', 'base', 'polygon', 'solana']),
         selectedDexes: new Set([
-            'quickswap', 'jupiter', '1inch', 'uniswap_v3', 'uniswap_v2', 'uniswap',
-            'pancakeswap', 'osmosis', 'sushiswap', 'unknown', 'coingecko', 'dexscreener',
-            'spookyswap', 'raydium', 'protofi', 'sunswap', 'spiritswap', 'beethovenx'
+            // Core DEXes (always enabled by default)
+            'uniswap_v3', 'uniswap_v2', 'uniswap', 'pancakeswap', 'sushiswap',
+            'osmosis', 'raydium', 'jupiter', 'quickswap', '1inch',
+
+            // Additional DEXes from backend data
+            'swapbased', 'pulsex', 'energiswap', 'traderjoe', 'babyswap',
+            'biswap', 'unchain-x', 'spookyswap', 'beethovenx', 'spiritswap',
+            'protofi', 'sunswap',
+
+            // Contract addresses and data sources (also from backend)
+            '0xFE87E130E2b13D842c4cA99f6E6567712f97C64d',
+            'unknown', 'coingecko', 'dexscreener'
         ])
     });
 
-    // Pagination states - controls table display
+    // PAGINATION STATES - Controls table display
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(20);
 
     // ===========================================
-    // DATA FETCHING HOOKS
+    // DATA FETCHING HOOKS - API integration
     // ===========================================
     const {
         data: opportunitiesData,
@@ -48,6 +58,7 @@ export function LiveOpportunitiesCard() {
     } = useDjangoData('/api/v1/opportunities/stats', {});
 
     console.log("Full API response:", opportunitiesData);
+
     // Extract raw opportunities from API response
     const rawOpportunities = opportunitiesData?.opportunities || [];
 
@@ -60,28 +71,74 @@ export function LiveOpportunitiesCard() {
     }, [rawOpportunities]);
 
     // ===========================================
-    // DATA PROCESSING & FILTERING
+    // DATA PROCESSING & FILTERING - Main business logic
     // ===========================================
 
     // Filter and sort opportunities based on user selections
     const filteredOpportunities = useMemo(() => {
-        const filtered = rawOpportunities.filter(opp => {
-            // Backend already returns correct field names - use them directly
+        const filtered = [];
+        const filteredOut = [];
+
+        rawOpportunities.forEach(opp => {
+            // Backend field mapping - use actual field names from API
             const score = opp.opportunity_score || opp.score || 0;
             const liquidity = opp.estimated_liquidity_usd || opp.liquidity_usd || 0;
             const chain = opp.chain || 'unknown';
             const dex = opp.dex || 'unknown';
 
-            return (
-                score >= filters.minScore &&
-                score <= filters.maxScore &&
-                liquidity >= filters.minLiquidity &&
-                liquidity <= filters.maxLiquidity &&
-                filters.selectedChains.has(chain) &&
-                filters.selectedDexes.has(dex)
-            );
-        }).sort((a, b) => {
-            // Sort by timestamp first (latest first), then by score (highest first)
+            // Apply all filter conditions
+            const scorePass = score >= filters.minScore && score <= filters.maxScore;
+            const liquidityPass = liquidity >= filters.minLiquidity && liquidity <= filters.maxLiquidity;
+            const chainPass = filters.selectedChains.has(chain);
+            const dexPass = filters.selectedDexes.has(dex);
+
+            const passes = scorePass && liquidityPass && chainPass && dexPass;
+
+            if (passes) {
+                filtered.push(opp);
+            } else {
+                // Debug logging for filtered out opportunities
+                const reasons = [];
+                if (!scorePass) reasons.push(`score ${score} outside ${filters.minScore}-${filters.maxScore}`);
+                if (!liquidityPass) reasons.push(`liquidity $${liquidity} outside $${filters.minLiquidity}-$${filters.maxLiquidity}`);
+                if (!chainPass) reasons.push(`chain '${chain}' not selected`);
+                if (!dexPass) reasons.push(`dex '${dex}' not selected`);
+
+                filteredOut.push({
+                    token: `${opp.token0_symbol}/${opp.token1_symbol}`,
+                    chain,
+                    dex,
+                    score,
+                    liquidity,
+                    reasons
+                });
+            }
+        });
+
+        // Enhanced debug logging for filtered out opportunities
+        if (filteredOut.length > 0) {
+            console.log(`🔍 FILTERED OUT ${filteredOut.length} opportunities:`);
+
+            // Group by filter reason for better debugging
+            const dexRejects = filteredOut.filter(f => f.reasons.some(r => r.includes('dex'))).map(f => f.dex);
+            const chainRejects = filteredOut.filter(f => f.reasons.some(r => r.includes('chain'))).map(f => f.chain);
+
+            if (dexRejects.length > 0) {
+                const uniqueDexes = [...new Set(dexRejects)];
+                console.log(`❌ Missing DEXes:`, uniqueDexes);
+            }
+
+            if (chainRejects.length > 0) {
+                const uniqueChains = [...new Set(chainRejects)];
+                console.log(`❌ Missing Chains:`, uniqueChains);
+            }
+
+            // Show detailed breakdown of first 5 filtered opportunities
+            console.table(filteredOut.slice(0, 5));
+        }
+
+        // Sort by timestamp (latest first), then by score (highest first)
+        const sorted = filtered.sort((a, b) => {
             const timeA = new Date(a.timestamp || a.created_at || 0).getTime();
             const timeB = new Date(b.timestamp || b.created_at || 0).getTime();
             if (timeB !== timeA) {
@@ -92,24 +149,24 @@ export function LiveOpportunitiesCard() {
             return scoreB - scoreA; // Then by score (highest first)
         });
 
-        console.log('Filtered count:', filtered.length, 'Items per page:', itemsPerPage);
-        return filtered;
+        console.log(`✅ PASSED filters: ${sorted.length}, ❌ FILTERED OUT: ${filteredOut.length}`);
+        return sorted;
     }, [rawOpportunities, filters, itemsPerPage]);
 
-    // DEBUG: Force pagination to show for testing
-    const shouldShowPagination = true; // Change this to test pagination
-    // const shouldShowPagination = filteredOpportunities.length > itemsPerPage;
+    // PAGINATION LOGIC
+    const shouldShowPagination = true; // Always show for debugging
+    const totalPages = Math.ceil(filteredOpportunities.length / itemsPerPage);
 
+    // Debug pagination calculations
     console.log('=== PAGINATION DEBUG ===');
     console.log('Raw opportunities:', rawOpportunities.length);
     console.log('Filtered opportunities:', filteredOpportunities.length);
     console.log('Items per page:', itemsPerPage);
-    console.log('Total pages:', Math.ceil(filteredOpportunities.length / itemsPerPage));
+    console.log('Total pages:', totalPages);
     console.log('Should show pagination:', shouldShowPagination);
     console.log('========================');
 
     // Paginate filtered opportunities for table display
-    const totalPages = Math.ceil(filteredOpportunities.length / itemsPerPage);
     const paginatedOpportunities = useMemo(() => {
         const startIndex = (currentPage - 1) * itemsPerPage;
         const endIndex = startIndex + itemsPerPage;
@@ -119,7 +176,7 @@ export function LiveOpportunitiesCard() {
     const opportunities = paginatedOpportunities;
 
     // ===========================================
-    // AUTO-REFRESH MECHANISM
+    // AUTO-REFRESH MECHANISM - Background data updates
     // ===========================================
 
     useEffect(() => {
@@ -144,7 +201,7 @@ export function LiveOpportunitiesCard() {
     }, [autoRefresh, refresh, refreshStats]);
 
     // ===========================================
-    // EVENT HANDLERS
+    // EVENT HANDLERS - User interaction callbacks
     // ===========================================
 
     const handleManualRefresh = async () => {
@@ -183,6 +240,7 @@ export function LiveOpportunitiesCard() {
         });
     };
 
+    // Reset all filters to default values
     const resetFilters = () => {
         setFilters({
             minScore: 0,
@@ -191,9 +249,13 @@ export function LiveOpportunitiesCard() {
             maxLiquidity: 10000000,
             selectedChains: new Set(['ethereum', 'bsc', 'base', 'polygon', 'solana']),
             selectedDexes: new Set([
-                'quickswap', 'jupiter', '1inch', 'uniswap_v3', 'uniswap_v2', 'uniswap',
-                'pancakeswap', 'osmosis', 'sushiswap', 'unknown', 'coingecko', 'dexscreener',
-                'spookyswap', 'raydium', 'protofi', 'sunswap', 'spiritswap', 'beethovenx'
+                // Reset to include all DEXes so nothing is filtered out
+                'uniswap_v3', 'uniswap_v2', 'uniswap', 'pancakeswap', 'sushiswap',
+                'osmosis', 'raydium', 'jupiter', 'quickswap', '1inch',
+                'swapbased', 'pulsex', 'energiswap', 'traderjoe', 'babyswap',
+                'biswap', 'unchain-x', 'spookyswap', 'beethovenx', 'spiritswap',
+                'protofi', 'sunswap', '0xFE87E130E2b13D842c4cA99f6E6567712f97C64d',
+                'unknown', 'coingecko', 'dexscreener'
             ])
         });
         setCurrentPage(1);
@@ -205,7 +267,7 @@ export function LiveOpportunitiesCard() {
     }, [filters]);
 
     // ===========================================
-    // PAGINATION HANDLERS
+    // PAGINATION HANDLERS - Page navigation
     // ===========================================
 
     const handlePageChange = (page) => {
@@ -218,7 +280,7 @@ export function LiveOpportunitiesCard() {
     };
 
     // ===========================================
-    // OPPORTUNITY ANALYSIS
+    // OPPORTUNITY ANALYSIS - Trading analysis modal
     // ===========================================
 
     const analyzeOpportunity = async (opportunity) => {
@@ -263,7 +325,7 @@ export function LiveOpportunitiesCard() {
     };
 
     // ===========================================
-    // UTILITY FUNCTIONS
+    // UTILITY FUNCTIONS - Helper methods
     // ===========================================
 
     const formatTimeAgo = (timestamp) => {
@@ -288,7 +350,7 @@ export function LiveOpportunitiesCard() {
     };
 
     // ===========================================
-    // COMPONENT RENDER
+    // COMPONENT RENDER - Main UI structure
     // ===========================================
 
     return (
@@ -345,7 +407,7 @@ export function LiveOpportunitiesCard() {
 
                 <Card.Body>
                     {/* ===========================================
-                        ERROR DISPLAY
+                        ERROR DISPLAY - API error handling
                         =========================================== */}
                     {error && (
                         <Alert variant="danger" className="mb-3">
@@ -359,7 +421,7 @@ export function LiveOpportunitiesCard() {
                     )}
 
                     {/* ===========================================
-                        FILTER CONTROLS
+                        FILTER CONTROLS - User filter interface
                         =========================================== */}
                     <Card className="mb-3 bg-light">
                         <Card.Body className="py-2">
@@ -371,7 +433,7 @@ export function LiveOpportunitiesCard() {
                             </div>
 
                             <Row>
-                                {/* Score Range Slider */}
+                                {/* Score Range Filter */}
                                 <Col md={3}>
                                     <Form.Group>
                                         <Form.Label className="small mb-1">
@@ -396,7 +458,7 @@ export function LiveOpportunitiesCard() {
                                     </Form.Group>
                                 </Col>
 
-                                {/* Liquidity Range Slider - Updated max value */}
+                                {/* Liquidity Range Filter */}
                                 <Col md={3}>
                                     <Form.Group>
                                         <Form.Label className="small mb-1">
@@ -440,37 +502,64 @@ export function LiveOpportunitiesCard() {
                                     </div>
                                 </Col>
 
-                                {/* DEX Filter - Updated with all DEXes */}
+                                {/* EXPANDED DEX Filter - Now includes ALL backend DEXes */}
                                 <Col md={3}>
                                     <Form.Label className="small mb-1">DEXes</Form.Label>
-                                    <div className="d-flex flex-wrap gap-1">
+                                    <div className="d-flex flex-wrap gap-1" style={{ maxHeight: '80px', overflowY: 'auto' }}>
                                         {[
+                                            // Core/Popular DEXes
                                             { key: 'uniswap', label: 'UNI' },
+                                            { key: 'uniswap_v2', label: 'UNI-V2' },
+                                            { key: 'uniswap_v3', label: 'UNI-V3' },
+                                            { key: 'pancakeswap', label: 'CAKE' },
+                                            { key: 'sushiswap', label: 'SUSHI' },
                                             { key: 'osmosis', label: 'OSMO' },
                                             { key: 'raydium', label: 'RAY' },
+                                            { key: 'jupiter', label: 'JUP' },
+                                            { key: 'quickswap', label: 'QUICK' },
+                                            { key: '1inch', label: '1INCH' },
+
+                                            // Previously missing DEXes from backend
+                                            { key: 'swapbased', label: 'SWBSE' },
+                                            { key: 'pulsex', label: 'PLSX' },
+                                            { key: 'energiswap', label: 'ENRG' },
+                                            { key: 'traderjoe', label: 'JOE' },
+                                            { key: 'babyswap', label: 'BABY' },
+                                            { key: 'biswap', label: 'BSW' },
+                                            { key: 'unchain-x', label: 'UCX' },
+
+                                            // Additional DEXes
                                             { key: 'spookyswap', label: 'BOO' },
-                                            { key: 'sushiswap', label: 'SUSHI' },
-                                            { key: 'pancakeswap', label: 'CAKE' },
                                             { key: 'beethovenx', label: 'BEETS' },
-                                            { key: 'spiritswap', label: 'SPIRIT' }
+                                            { key: 'spiritswap', label: 'SPIRIT' },
+                                            { key: 'protofi', label: 'PROTO' },
+                                            { key: 'sunswap', label: 'SUN' },
+
+                                            // Contract addresses and sources
+                                            { key: '0xFE87E130E2b13D842c4cA99f6E6567712f97C64d', label: '0xFE87...' },
+                                            { key: 'unknown', label: 'UNKNOWN' },
+                                            { key: 'coingecko', label: 'CG' },
+                                            { key: 'dexscreener', label: 'DXSCR' }
                                         ].map(({ key, label }) => (
                                             <Badge
                                                 key={key}
                                                 bg={filters.selectedDexes.has(key) ? 'success' : 'outline-secondary'}
-                                                style={{ cursor: 'pointer', fontSize: '0.7rem' }}
+                                                style={{ cursor: 'pointer', fontSize: '0.6rem' }}
                                                 onClick={() => handleDexToggle(key)}
+                                                title={key} // Show full name on hover
                                             >
                                                 {label}
                                             </Badge>
                                         ))}
                                     </div>
+                                    <small className="text-muted">Click to toggle DEXes. Scroll for more options.</small>
                                 </Col>
                             </Row>
                         </Card.Body>
                     </Card>
 
                     {/* ===========================================
-                        STATS SUMMARY
+                        STATS SUMMARY - Quick overview metrics
                         =========================================== */}
                     {stats && (
                         <div className="row mb-3">
@@ -506,7 +595,7 @@ export function LiveOpportunitiesCard() {
                     )}
 
                     {/* ===========================================
-                        PAGINATION CONTROLS - TOP (Always show for debugging)
+                        PAGINATION CONTROLS - TOP
                         =========================================== */}
                     {shouldShowPagination && (
                         <Card className="mb-3 bg-primary bg-opacity-10 border-primary">
@@ -583,7 +672,7 @@ export function LiveOpportunitiesCard() {
                     )}
 
                     {/* ===========================================
-                        QUICK JUMP TO PAGES (For large datasets)
+                        QUICK JUMP TO PAGES - For large datasets
                         =========================================== */}
                     {totalPages > 10 && (
                         <div className="d-flex justify-content-center mb-3">
@@ -616,7 +705,7 @@ export function LiveOpportunitiesCard() {
                     )}
 
                     {/* ===========================================
-                        LOADING STATE
+                        LOADING STATE - Data fetch indicator
                         =========================================== */}
                     {loading && opportunities.length === 0 && (
                         <div className="text-center py-4">
@@ -647,7 +736,7 @@ export function LiveOpportunitiesCard() {
                                 </thead>
                                 <tbody>
                                     {opportunities.map((opp, index) => {
-                                        // Use actual backend fields
+                                        // Safe field extraction with fallbacks
                                         const token0 = opp.token0_symbol || 'TOKEN0';
                                         const token1 = opp.token1_symbol || 'TOKEN1';
                                         const address = opp.pair_address || opp.address || '';
@@ -679,9 +768,11 @@ export function LiveOpportunitiesCard() {
                                                     <Badge bg="secondary">{chain}</Badge>
                                                 </td>
 
-                                                {/* DEX Column */}
+                                                {/* DEX Column - Truncated display for long contract addresses */}
                                                 <td>
-                                                    <Badge bg="info">{dex}</Badge>
+                                                    <Badge bg="info" title={dex}>
+                                                        {dex.length > 10 ? `${dex.slice(0, 8)}...` : dex}
+                                                    </Badge>
                                                 </td>
 
                                                 {/* Liquidity Column - Color coded by amount */}
@@ -764,7 +855,7 @@ export function LiveOpportunitiesCard() {
                         </div>
                     ) : (
                         /* ===========================================
-                            NO DATA STATE
+                            NO DATA STATE - Empty state handling
                             =========================================== */
                         !loading && (
                             <Alert variant="info">
@@ -777,7 +868,7 @@ export function LiveOpportunitiesCard() {
                     )}
 
                     {/* ===========================================
-                        PAGINATION CONTROLS - BOTTOM (Always show for debugging)
+                        PAGINATION CONTROLS - BOTTOM
                         =========================================== */}
                     {shouldShowPagination && (
                         <div className="d-flex justify-content-center mt-3 border-top pt-3">
@@ -834,7 +925,7 @@ export function LiveOpportunitiesCard() {
             <Modal
                 show={showAnalysisModal}
                 onHide={closeModal}
-                size="xl"  // Changed to extra large for more data
+                size="xl"  // Extra large for comprehensive data display
                 backdrop="static"
                 keyboard={false}
             >
@@ -1179,7 +1270,7 @@ export function LiveOpportunitiesCard() {
                                     )}
 
                                     {/* ===========================================
-                                        PAIR INFO
+                                        PAIR INFO - Technical details
                                         =========================================== */}
                                     {analysisResult.pair_info && (
                                         <Card className="mb-3 bg-light">
