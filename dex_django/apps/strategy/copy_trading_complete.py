@@ -10,11 +10,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Depends, BackgroundTasks
 from pydantic import BaseModel, Field, validator
 
-from dex_django.discovery.wallet_monitor import wallet_monitor
-from dex_django.strategy.copy_trading_strategy import copy_trading_strategy
-from dex_django.strategy.trader_performance_tracker import trader_performance_tracker
-from dex_django.trading.live_executor import live_executor
-from dex_django.core.runtime_state import runtime_state
+from dex_django.apps.discovery.wallet_monitor import wallet_monitor
+from dex_django.apps.strategy.copy_trading_strategy import copy_trading_strategy
+from dex_django.apps.strategy.trader_performance_tracker import trader_performance_tracker
+from dex_django.apps.trading.live_executor import live_executor
+from dex_django.apps.core.runtime_state import runtime_state
 import aysncio
 
 router = APIRouter(prefix="/api/v1/copy", tags=["copy-trading"])
@@ -450,7 +450,7 @@ async def simulate_copy_trade(
     """Simulate a copy trade without executing it."""
     try:
         # Create mock wallet transaction for simulation
-        from dex_django.discovery.wallet_monitor import WalletTransaction
+        from dex_django.apps.discovery.wallet_monitor import WalletTransaction
         
         mock_tx = WalletTransaction(
             tx_hash="0xsimulation",

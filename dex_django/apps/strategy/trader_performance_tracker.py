@@ -9,8 +9,8 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 
-from dex_django.discovery.wallet_monitor import WalletTransaction
-from dex_django.core.runtime_state import runtime_state
+from dex_django.apps.discovery.wallet_monitor import WalletTransaction
+from dex_django.apps.core.runtime_state import runtime_state
 
 logger = logging.getLogger(__name__)
 

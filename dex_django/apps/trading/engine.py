@@ -84,7 +84,7 @@ risk_manager = MockRiskManager()
 # Try to import and wrap real modules
 try:
     import apps.intelligence.strategy_engine as imported_strategy_engine
-    import apps.intelligence.risk_manager as imported_risk_manager
+    import dex_django.apps.strategy.risk_manager as imported_risk_manager
     
     # Create wrapper with real modules
     wrapper = IntelligenceWrapper(imported_strategy_engine, imported_risk_manager)

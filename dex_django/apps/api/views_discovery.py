@@ -12,6 +12,10 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+from fastapi import HTTPException, status
+from fastapi.responses import JSONResponse
+from typing import Dict, Any
+
 # Import will be fixed - need to create a sync version
 # from dex_django.discovery.engine import discovery_engine
 

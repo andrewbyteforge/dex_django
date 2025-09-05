@@ -12,10 +12,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel
 
-from dex_django.discovery.wallet_monitor import WalletTransaction
-from dex_django.strategy.risk_manager import RiskGateResult, RiskManager
-from dex_django.strategy.orders import TradeIntent
-from dex_django.core.runtime_state import runtime_state
+from dex_django.apps.discovery.wallet_monitor import WalletTransaction
+from dex_django.apps.strategy.risk_manager import RiskGateResult, RiskManager
+from dex_django.apps.strategy.orders import TradeIntent
+from dex_django.apps.core.runtime_state import runtime_state
 
 logger = logging.getLogger(__name__)
 

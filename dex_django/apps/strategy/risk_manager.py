@@ -47,6 +47,34 @@ class PositionSizing:
     confidence_score: float
     risk_warnings: List[str]
 
+
+
+@dataclass
+class RiskGateResult:
+    """Result of risk gate evaluation for copy trading."""
+    passed: bool
+    score: float  # 0.0 to 10.0, lower is safer
+    reasons: List[str]
+    warnings: List[str]
+    max_position_usd: Decimal
+    recommended_position_usd: Decimal
+    stop_loss_price: Optional[Decimal] = None
+    take_profit_price: Optional[Decimal] = None
+    
+    @property
+    def risk_level(self) -> RiskLevel:
+        """Convert numeric score to risk level enum."""
+        if self.score <= 3.0:
+            return RiskLevel.LOW
+        elif self.score <= 5.0:
+            return RiskLevel.MEDIUM
+        elif self.score <= 7.0:
+            return RiskLevel.HIGH
+        else:
+            return RiskLevel.EXTREME
+
+
+
 class RiskManager:
     """Advanced risk management system for automated trading."""
     
@@ -175,6 +203,55 @@ class RiskManager:
                 confidence_score=0.1,
                 risk_warnings=["Risk calculation failed - using minimal position"]
             )
+        
+    async def evaluate_risk_gates(
+        self,
+        opportunity: Dict[str, Any],
+        trader_config: Dict[str, Any],
+        market_analysis: Any = None
+    ) -> RiskGateResult:
+        """Evaluate if trade passes risk gates for copy trading."""
+        
+        reasons = []
+        warnings = []
+        score = 0.0
+        
+        # Basic validation
+        if not opportunity.get("estimated_liquidity_usd", 0):
+            return RiskGateResult(
+                passed=False,
+                score=10.0,
+                reasons=["No liquidity data available"],
+                warnings=[],
+                max_position_usd=Decimal("0"),
+                recommended_position_usd=Decimal("0")
+            )
+        
+        # Calculate position sizing
+        risk_mode = TradingMode.MODERATE  # Default
+        user_balance = Decimal("10000")  # Mock balance
+        
+        position_sizing = await self.calculate_position_size(
+            opportunity, market_analysis, user_balance, risk_mode
+        )
+        
+        # Determine if trade passes
+        passed = (
+            position_sizing.recommended_amount_usd > 0 and
+            position_sizing.confidence_score > 0.3 and
+            len(position_sizing.risk_warnings) < 3
+        )
+        
+        return RiskGateResult(
+            passed=passed,
+            score=max(0.0, 10.0 - position_sizing.confidence_score * 10),
+            reasons=reasons,
+            warnings=position_sizing.risk_warnings,
+            max_position_usd=position_sizing.max_safe_amount_usd,
+            recommended_position_usd=position_sizing.recommended_amount_usd,
+            stop_loss_price=position_sizing.stop_loss_price,
+            take_profit_price=position_sizing.take_profit_price
+        )
     
     async def _calculate_base_position_size(
         self,

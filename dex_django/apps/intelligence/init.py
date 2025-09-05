@@ -7,7 +7,7 @@ from .market_analyzer import market_intelligence
 from .advanced_risk_detection import advanced_risk_detector
 from .mempool_analyzer import mempool_intelligence
 from .cross_chain_analyzer import cross_chain_analyzer
-from .risk_manager import risk_manager, TradingMode
+from ..strategy.risk_manager import risk_manager, TradingMode
 from .strategy_engine import strategy_engine, StrategyType
 
 # Enable advanced features

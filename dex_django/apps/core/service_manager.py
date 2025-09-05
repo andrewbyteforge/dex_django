@@ -142,7 +142,7 @@ class ServiceManager:
     async def _initialize_copy_trading_service(self) -> None:
         """Initialize the main CopyTradingService."""
         try:
-            from dex_django.services import copy_trading_service, COPY_TRADING_SERVICE_AVAILABLE
+            from dex_django.apps.services import copy_trading_service, COPY_TRADING_SERVICE_AVAILABLE
             
             if not COPY_TRADING_SERVICE_AVAILABLE:
                 raise ImportError("CopyTradingService not available")
@@ -158,7 +158,7 @@ class ServiceManager:
         """Initialize WalletMonitor for transaction detection."""
         try:
             # Try to import existing wallet monitor
-            from dex_django.discovery.wallet_monitor import wallet_monitor
+            from dex_django.apps.discovery.wallet_monitor import wallet_monitor
             self.wallet_monitor = wallet_monitor
             logger.info("✅ WalletMonitor initialized")
             
@@ -171,7 +171,7 @@ class ServiceManager:
     async def _initialize_copy_strategy(self) -> None:
         """Initialize CopyTradingStrategy for decision making."""
         try:
-            from dex_django.strategy.copy_trading_strategy import copy_trading_strategy
+            from dex_django.apps.strategy.copy_trading_strategy import copy_trading_strategy
             self.copy_strategy = copy_trading_strategy
             logger.info("✅ CopyTradingStrategy initialized")
             

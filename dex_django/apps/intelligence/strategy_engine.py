@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .market_analyzer import market_intelligence
-from .risk_manager import risk_manager, TradingMode
+from ..strategy.risk_manager import risk_manager, TradingMode
 from .cross_chain_analyzer import cross_chain_analyzer
 
 logger = logging.getLogger("intelligence.strategy")

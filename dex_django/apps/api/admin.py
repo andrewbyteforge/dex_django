@@ -8,9 +8,6 @@ from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-# from dex_django.core.data_seeder import copy_trading_seeder
-# from dex_django.copy_trading.copy_trading_coordinator import copy_trading_coordinator
-
 # from backend.data_seeder import copy_trading_seeder
 from apps.core.data_seeder import copy_trading_seeder  # Fixed path
 
