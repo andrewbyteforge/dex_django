@@ -11,12 +11,33 @@ from dataclasses import dataclass
 from enum import Enum
 
 import httpx
-
-from dex_django.storage.copy_trading_repo import create_copy_trading_repositories
-from dex_django.storage.copy_trading_models import ChainType, WalletStatus, CopyMode
-from dex_django.copy_trading.copy_trading_coordinator import copy_trading_coordinator
-from dex_django.core.database import get_db
-from dex_django.core.runtime_state import runtime_state
+try:
+    from apps.storage.copy_trading_repo import create_copy_trading_repositories
+    from apps.storage.copy_trading_models import ChainType, WalletStatus, CopyMode
+    from apps.copy_trading.copy_trading_coordinator import copy_trading_coordinator
+    from apps.core.database import get_db
+    from apps.core.runtime_state import runtime_state
+    
+    IMPORTS_AVAILABLE = True
+    logger = logging.getLogger("discovery.wallet_discovery")
+    
+except ImportError as e:
+    # Graceful fallback if imports are not available
+    IMPORTS_AVAILABLE = False
+    logger = logging.getLogger("discovery.wallet_discovery")
+    logger.warning(f"Copy trading imports not available: {e}")
+    
+    # Create stub classes/enums to prevent import errors
+    class ChainType:
+        ETHEREUM = "ethereum"
+        BSC = "bsc" 
+        BASE = "base"
+        POLYGON = "polygon"
+        
+    class DiscoverySource:
+        DEXSCREENER = "dexscreener"
+        ETHERSCAN = "etherscan"
+        MANUAL = "manual"
 
 logger = logging.getLogger("discovery.wallet_discovery")
 

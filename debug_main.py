@@ -490,7 +490,6 @@ def calculate_profit_potential(opp: Dict[str, Any]) -> float:
 # ============================================================================
 
 api_router = APIRouter(prefix="/api/v1")
-discovery_router = APIRouter(prefix="/api/v1")
 
 
 @api_router.get("/copy/system/status")
@@ -546,67 +545,6 @@ async def get_copy_trading_system_status():
         }
 
 
-@discovery_router.post("/copy/discovery/discover-traders")
-async def discover_traders_endpoint(request_data: dict = None):
-    """Auto-discover high-performing traders."""
-    try:
-        body = request_data or {}
-        chains = body.get('chains', ['ethereum', 'bsc', 'base'])
-        limit = min(body.get('limit', 10), 50)
-        min_volume_usd = body.get('min_volume_usd', 10000.0)
-        days_back = body.get('days_back', 7)
-        auto_add_threshold = body.get('auto_add_threshold', 85.0)
-        
-        logger.info(f"🔍 Discovering traders: chains={chains}, limit={limit}")
-        
-        # Mock high-performance traders for development
-        discovered_traders = []
-        for i in range(min(limit, 5)):
-            trader = {
-                "wallet_address": f"0x{''.join([f'{random.randint(0,15):x}' for _ in range(40)])}",
-                "trader_name": f"HighPerformanceTrader_{i+1}",
-                "performance_score": round(random.uniform(75.0, 95.0), 2),
-                "total_profit_7d": round(random.uniform(10000, 100000), 2),
-                "win_rate": round(random.uniform(65.0, 85.0), 2),
-                "avg_trade_size": round(random.uniform(1000, 50000), 2),
-                "chains": random.sample(chains, k=random.randint(1, len(chains))),
-                "last_active": datetime.now(timezone.utc).isoformat(),
-                "auto_add_eligible": random.choice([True, False])
-            }
-            discovered_traders.append(trader)
-
-        return {
-            "status": "ok",
-            "success": True,
-            "discovered_wallets": discovered_traders,
-            "candidates": discovered_traders,
-            "data": discovered_traders,
-            "count": len(discovered_traders),
-            "discovery_params": {
-                "chains": chains,
-                "limit": limit,
-                "min_volume_usd": min_volume_usd,
-                "days_back": days_back,
-                "auto_add_threshold": auto_add_threshold
-            },
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-        
-    except Exception as e:
-        logger.error(f"Trader discovery error: {e}")
-        return {
-            "status": "error",
-            "success": False,
-            "error": str(e),
-            "message": f"Discovery failed: {str(e)}",
-            "discovered_wallets": [],
-            "candidates": [],
-            "data": [],
-            "count": 0,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-
-
 @api_router.get("/opportunities/live")
 async def get_live_opportunities():
     """Get live trading opportunities."""
@@ -637,7 +575,7 @@ async def debug_database_traders():
         if not ensure_django_setup():
             return {"error": "Django not configured"}
         
-        from apps.storage.models import FollowedTrader
+        from dex_django.apps.storage.models import FollowedTrader
         
         # Get all traders
         all_traders = FollowedTrader.objects.all()
@@ -714,9 +652,30 @@ def get_app():
         # Create the app from the factory
         app = create_configured_debug_app()
         
-        # Add our discovery router to fix the missing endpoint
-        app.include_router(discovery_router, tags=["discovery"])
-        logger.info("Discovery router added to debug app")
+        # ✅ REGISTER REAL WALLET DISCOVERY ROUTER (REPLACES MOCK)
+        try:
+            from dex_django.apps.api.wallet_discovery import router as real_discovery_router
+            app.include_router(real_discovery_router, tags=["wallet-discovery"])
+            logger.info("✅ Real wallet discovery router registered successfully")
+            
+            # List the real endpoints that are now available
+            discovery_routes = [
+                "POST /api/v1/discovery/discover-traders",
+                "POST /api/v1/discovery/analyze-wallet", 
+                "GET /api/v1/discovery/status",
+                "POST /api/v1/discovery/add-discovered-wallet/{address}/{chain}",
+                "POST /api/v1/discovery/continuous/start",
+                "POST /api/v1/discovery/continuous/stop"
+            ]
+            
+            logger.info("📋 Available discovery endpoints:")
+            for route in discovery_routes:
+                logger.info(f"  - {route}")
+                
+        except ImportError as e:
+            logger.error(f"❌ Failed to import real wallet discovery router: {e}")
+            logger.error("Discovery functionality will not be available")
+            logger.error("This means the frontend will get 404 errors on discovery requests")
         
         # Add API router for copy trading status
         app.include_router(api_router, tags=["debug-api"])
@@ -767,6 +726,7 @@ def get_app():
         logger.info("🎉 Debug app with copy trading system ready!")
         logger.info("📍 Copy trading status: http://127.0.0.1:8000/api/v1/copy/system/status")
         logger.info("📍 Live opportunities: http://127.0.0.1:8000/api/v1/opportunities/live")
+        logger.info("📍 Real discovery: http://127.0.0.1:8000/api/v1/discovery/discover-traders")
         logger.info("📍 Trading API: http://127.0.0.1:8000/api/v1/copy/")
         logger.info("🔌 WebSocket endpoints available at /ws/...")
         
@@ -780,6 +740,7 @@ def get_app():
 # ============================================================================
 # MAIN ENTRY POINT
 # ============================================================================
+
 
 def main() -> None:
     """
