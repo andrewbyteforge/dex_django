@@ -122,6 +122,7 @@ class TransactionAnalyzer:
                 "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45": "Uniswap V3",
                 "0xd9e1ce17f2641f24ae83637ab66a2cca9c378b9f": "SushiSwap",
                 "0x1111111254fb6c44bac0bed2854e76f90643097d": "1inch",
+                "0xdef1c0ded9bec7f1a1670819833240f027b25eff": "0x Protocol",
             },
             "bsc": {
                 "0x10ed43c718714eb63d5aa57b78b54704e256024e": "PancakeSwap V2",
@@ -137,7 +138,17 @@ class TransactionAnalyzer:
                 "0xa5e0829caced8ffdd4de3c43696c57f7d7a678ff": "QuickSwap",
                 "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506": "SushiSwap",
                 "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3",
-            }
+            "Arbitrum": {
+                "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506": "SushiSwap",
+                "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3",
+                "0x9527e2d01a3064ef6b50c1da1c0cc523803bcff2": "Camelot",
+            },
+                
+            "Optimism": {
+                "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3",
+                "0x9c12939390052919af3155f41bf4160fd3666a6f": "Velodrome V1",
+                "0xa062ae8a9c5e11aaa026fc2670b0d65ccc8b2858": "Velodrome V2",
+            },
         }
         
         # Rate limiting - INCREASED to avoid Etherscan's 2/sec limit
@@ -158,7 +169,7 @@ class TransactionAnalyzer:
             "v2_api_failures": 0
         }
         
-        logger.info(f"✅ Transaction Analyzer initialized")
+        logger.info(f"✅ Transaction Analyzer initialized")        
         logger.info(f"📊 API Keys loaded: {list(self.api_keys.keys())}")
         logger.info(f"🌐 V2 API enabled: {self.use_v2_api}")
         if self.initialization_errors:
@@ -209,7 +220,7 @@ class TransactionAnalyzer:
         self,
         pair_address: str,
         chain: str,
-        hours_back: int = 12,
+        hours_back: int = 168,
         min_trades: int = 3
     ) -> AnalysisResult:
         """
@@ -658,12 +669,13 @@ class TransactionAnalyzer:
             # Calculate confidence score
             avg_trade_usd = avg_trade_size * 2000  # existing approx conversion
 
-            confidence_score = self._calculate_confidence_score(
-                trades_count,
-                win_rate,
-                float(total_gas_spent),
-                avg_trade_usd
-            )
+    def _calculate_confidence_score(
+        self,
+        total_trades: int,
+        win_rate: float,
+        gas_spent: float
+    ) -> float:
+        score = 40.0  # Increased base score from 0.0
 
             
             # Get last trade timestamp
@@ -831,6 +843,7 @@ class TransactionAnalyzer:
         self,
         trades_count: int,
         win_rate: float,
+        total_trades: int,
         gas_spent: float,
         avg_trade_size_usd: float
     ) -> float:
@@ -839,36 +852,31 @@ class TransactionAnalyzer:
         Takes into account trade count, win rate, gas used, and avg trade size.
         """
 
-        score = 0.0
+        score = 40.0  # Increased base score from 0.0
 
-        # 🎯 Trade count (max 30)
-        if trades_count >= 20:
+        # Trade frequency component (more generous)
+        if total_trades >= 20:
             score += 30
-        elif trades_count >= 10:
+        elif total_trades >= 10:
+            score += 25
+        elif total_trades >= 5:
             score += 20
-        elif trades_count >= 5:
+        elif total_trades >= 3:
+            score += 15
+        elif total_trades >= 2:
             score += 10
-
-        # 📈 Win rate (max 40, scaled linearly from 50% to 100%)
-        if win_rate >= 50:
-            scaled_score = min((win_rate - 50) * 0.8, 40)
-            score += scaled_score
-
-        # ⛽ Gas activity (max 10)
-        if gas_spent >= 0.1:
-            score += 10
-        elif gas_spent >= 0.05:
-            score += 5
-
-        # 💵 Trade size (max 20)
-        if avg_trade_size_usd >= 2000:
+        
+        # Win rate component (more generous)
+        if win_rate >= 70:
+            score += 30
+        elif win_rate >= 60:
+            score += 25
+        elif win_rate >= 50:
             score += 20
-        elif avg_trade_size_usd >= 1000:
+        elif win_rate >= 40:
             score += 10
-        elif avg_trade_size_usd >= 500:
-            score += 5
-
-        return round(min(score, 100), 1)
+        
+        return min(100.0, max(0.0, score))
 
     
 
@@ -932,13 +940,27 @@ class TransactionAnalyzer:
         ##############################################################
         test_pairs = {
             # ✅ Uniswap V3 Router – Ethereum
-            "ethereum": "0xe592427a0aece92de3edee1f18e0157c05861564",
+            "ethereum": ["0xe592427a0aece92de3edee1f18e0157c05861564",
+                         "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640",  # USDC/WETH Uniswap V3 (highest volume)
+                         "0x11b815efB8f581194ae79006d24E0d814B7697F6",  # WETH/USDT Uniswap V3
+                         "0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8",  # USDC/WETH Uniswap V3                        
+                         ],
 
             # ✅ PancakeSwap V2 Router – BSC
-            "bsc": "0x10ED43C718714eb63d5aA57B78B54704E256024E",
+            "bsc": ["0x10ED43C718714eb63d5aA57B78B54704E256024E",
+                    "0x16b9a82891338f9bA80E2D6970FddA79D1eb0daE",  # WBNB/USDT PancakeSwap V2
+                    "0x7EFaEf62fDdCCa950418312c6C91Aef321375A00",  # BUSD/USDT PancakeSwap V2
+                    "0x58F876857a02D6762E0101bb5C46A8c1ED44Dc16",
+                    ],  # BNB/BUSD PancakeSwap V2
+
 
             # ✅ BaseSwap Router – Base (you can confirm if you're using BaseSwap)
-            "base": "0x327Df1E6de05895d2ab08513aaDD9313Fe505d86",  # BaseSwap V2 Router
+            "base": ["0x327Df1E6de05895d2ab08513aaDD9313Fe505d86", 
+                     "0x88A43bbDF9D098eEC7bCEda4e2494615dfD9bB9C",  # WETH/USDbC Aerodrome
+                     "0xcDAC0d6c6C59727a65F871236188350531885C43",  # WETH/USDC Aerodrome
+                     "0x0D0b7da3E0Efd714edfaD8B799aD8D5a69Dd6545",
+                     ],  # cbETH/WETH Uniswap V3
+                    
 
             # ✅ QuickSwap Router – Polygon
             "polygon": "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff",
@@ -970,7 +992,7 @@ class TransactionAnalyzer:
                 result = await self.find_traders_from_pair(
                     pair_address=pair_address,
                     chain=chain,
-                    hours_back=48,  # Extended to 6 hours to find more transactions
+                    hours_back=,  # Extended to 6 hours to find more transactions
                     min_trades=1   # Low threshold for testing
                 )
                 
