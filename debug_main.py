@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional
 import traceback
 import uvicorn
 import uuid
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 
 logging.getLogger("api.copy_trading_discovery").setLevel(logging.INFO)
@@ -114,8 +114,8 @@ def ensure_django_setup() -> bool:
                     'django.contrib.contenttypes',
                     'django.contrib.auth',
                     'dex_django.apps.core',
-                    'dex_django.apps.ledger',        # CRITICAL: Add this
-                    'dex_django.apps.intelligence',  # CRITICAL: Add this
+                    'dex_django.apps.ledger',        # Add this
+                    'dex_django.apps.intelligence',  # Add this
                 ],
                 USE_TZ=True,
                 SECRET_KEY='debug-secret-key-not-for-production',
@@ -124,33 +124,8 @@ def ensure_django_setup() -> bool:
             
         django.setup()
         
-        # Create tables using raw SQL since Django migrations might not work in this setup
-        from django.db import connection
-        
-        with connection.cursor() as cursor:
-            # Create the ledger_followedtrader table that copy trading needs
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ledger_followedtrader (
-                    id VARCHAR(36) PRIMARY KEY,
-                    wallet_address VARCHAR(42) NOT NULL,
-                    trader_name VARCHAR(100) NOT NULL,
-                    description TEXT,
-                    chain VARCHAR(20) DEFAULT 'ethereum',
-                    copy_mode VARCHAR(20) DEFAULT 'percentage',
-                    copy_percentage DECIMAL(5,2) DEFAULT 3.0,
-                    fixed_amount_usd DECIMAL(10,2),
-                    max_position_usd DECIMAL(10,2) DEFAULT 1000.0,
-                    min_trade_value_usd DECIMAL(10,2) DEFAULT 50.0,
-                    max_slippage_bps INTEGER DEFAULT 300,
-                    copy_buy_only BOOLEAN DEFAULT FALSE,
-                    copy_sell_only BOOLEAN DEFAULT FALSE,
-                    status VARCHAR(20) DEFAULT 'active',
-                    is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(wallet_address)
-                )
-            """)
+        # Create the required model files if they don't exist
+        create_django_model_files()
         
         logger.info("Django ORM initialized successfully with copy trading apps")
         return True
@@ -159,6 +134,78 @@ def ensure_django_setup() -> bool:
         logger.error(f"Django setup failed: {e}")
         return False
 
+
+
+def create_django_model_files():
+    """Create minimal Django model files for copy trading."""
+    try:
+        # Create ledger models
+        ledger_models_path = os.path.join(current_dir, 'dex_django', 'apps', 'ledger', 'models.py')
+        os.makedirs(os.path.dirname(ledger_models_path), exist_ok=True)
+        
+        ledger_models_content = '''
+from django.db import models
+import uuid
+
+class FollowedTrader(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    wallet_address = models.CharField(max_length=42)
+    trader_name = models.CharField(max_length=100)
+    description = models.TextField(blank=True, null=True)
+    chain = models.CharField(max_length=20, default='ethereum')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+class CopyTrade(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    followed_trader = models.ForeignKey(FollowedTrader, on_delete=models.CASCADE)
+    token_symbol = models.CharField(max_length=20)
+    action = models.CharField(max_length=10)
+    created_at = models.DateTimeField(auto_now_add=True)
+'''
+        
+        with open(ledger_models_path, 'w') as f:
+            f.write(ledger_models_content)
+        
+        # Create intelligence models
+        intelligence_models_path = os.path.join(current_dir, 'dex_django', 'apps', 'intelligence', 'models.py')
+        os.makedirs(os.path.dirname(intelligence_models_path), exist_ok=True)
+        
+        intelligence_models_content = '''
+from django.db import models
+import uuid
+
+class WalletAnalysis(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    wallet_address = models.CharField(max_length=42)
+    quality_score = models.IntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+class TraderCandidate(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    wallet_address = models.CharField(max_length=42)
+    chain = models.CharField(max_length=20)
+    quality_score = models.IntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+'''
+        
+        with open(intelligence_models_path, 'w') as f:
+            f.write(intelligence_models_content)
+            
+        # Create __init__.py files
+        for path in [
+            os.path.join(current_dir, 'dex_django', 'apps', 'ledger', '__init__.py'),
+            os.path.join(current_dir, 'dex_django', 'apps', 'intelligence', '__init__.py')
+        ]:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w') as f:
+                f.write('')
+                
+        logger.info("Created Django model files for copy trading")
+        
+    except Exception as e:
+        logger.error(f"Failed to create Django model files: {e}")
 
 
 
@@ -863,7 +910,7 @@ def get_app():
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             # Create a dummy router to prevent the app from crashing
-            from fastapi import APIRouter
+            from fastapi import APIRouter, HTTPException
             ws_router = APIRouter()
             logger.info("Created dummy WebSocket router as fallback")
 
