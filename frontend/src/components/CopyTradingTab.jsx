@@ -254,30 +254,45 @@ export function CopyTradingTab() {
             setDiscoveryLoading(true);
             setDiscoveryError(null);
 
+            console.log('📡 Starting auto discovery with config:', discoveryConfig);
+
             const response = await discoveryApi.discoverTraders(discoveryConfig);
 
-            if (response.status === 'ok' && response.discovered_wallets) {
-                const formattedWallets = response.discovered_wallets.map(wallet => ({
-                    id: wallet.id,
-                    address: wallet.address,
-                    chain: wallet.chain,
-                    quality_score: parseInt(wallet.quality_score || 0),
-                    total_volume_usd: parseFloat(wallet.total_volume_usd || 0),
-                    win_rate: parseFloat(wallet.win_rate || 0),
-                    trades_count: parseInt(wallet.trades_count || 0),
-                    avg_trade_size: parseFloat(wallet.avg_trade_size || 0),
-                    last_active: wallet.last_active,
-                    recommended_copy_percentage: parseFloat(wallet.recommended_copy_percentage || 0),
-                    risk_level: wallet.risk_level,
-                    confidence: wallet.confidence
-                }));
-                setDiscoveredWallets(formattedWallets);
+            console.log('📊 Discovery API response:', response);
+
+            if (response.status === 'ok') {
+                // Handle multiple possible response structures
+                let wallets = response.discovered_wallets || response.candidates || response.data || [];
+
+                if (Array.isArray(wallets) && wallets.length > 0) {
+                    const formattedWallets = wallets.map(wallet => ({
+                        id: wallet.id || wallet.address,
+                        address: wallet.address,
+                        chain: wallet.chain,
+                        quality_score: parseInt(wallet.quality_score || wallet.confidence_score || 0),
+                        total_volume_usd: parseFloat(wallet.total_volume_usd || 0),
+                        win_rate: parseFloat(wallet.win_rate || 0),
+                        trades_count: parseInt(wallet.trades_count || wallet.total_trades || 0),
+                        avg_trade_size: parseFloat(wallet.avg_trade_size || wallet.avg_trade_size_usd || 0),
+                        last_active: wallet.last_active || wallet.last_trade,
+                        recommended_copy_percentage: parseFloat(wallet.recommended_copy_percentage || 0),
+                        risk_level: wallet.risk_level || 'Medium',
+                        confidence: wallet.confidence || 'Medium'
+                    }));
+
+                    console.log(`✅ Formatted ${formattedWallets.length} discovered wallets:`, formattedWallets);
+                    setDiscoveredWallets(formattedWallets);
+                } else {
+                    console.warn('⚠️ No wallets found in discovery response');
+                    setDiscoveredWallets([]);
+                    setDiscoveryError('No profitable traders found with current criteria');
+                }
             } else {
                 throw new Error(response.error || 'Discovery failed');
             }
         } catch (err) {
             setDiscoveryError(err.message || 'Failed to start auto discovery');
-            console.error('Auto discovery error:', err);
+            console.error('❌ Auto discovery error:', err);
         } finally {
             setDiscoveryLoading(false);
         }

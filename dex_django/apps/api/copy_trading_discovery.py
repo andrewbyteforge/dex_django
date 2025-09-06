@@ -131,37 +131,53 @@ class CopyTradingDiscoveryEngine:
     
     async def discover_traders_real(self, request: DiscoveryRequest) -> List[Dict[str, Any]]:
         """Perform REAL trader discovery using multiple data sources."""
-        logger.info(f"🔍 Discovering REAL traders: chains={request.chains}, limit={request.limit}")
+        logger.info(f"🔍 STARTING discover_traders_real: chains={request.chains}, limit={request.limit}")
         
         try:
             all_candidates = []
             
             # Discovery from multiple sources
             for chain_str in request.chains:
-                chain = ChainType(chain_str)
+                logger.info(f"🔗 Processing chain: {chain_str}")
                 
-                # Source 1: DexScreener API
-                dex_candidates = await self._discover_from_dexscreener(
-                    chain, request.limit // len(request.chains), request.min_volume_usd
-                )
-                all_candidates.extend(dex_candidates)
-                
-                # Source 2: Blockchain Explorer APIs  
-                explorer_candidates = await self._discover_from_explorer(
-                    chain, request.limit // len(request.chains), request.days_back
-                )
-                all_candidates.extend(explorer_candidates)
+                try:
+                    chain = ChainType(chain_str)
+                    logger.info(f"✅ Chain enum created: {chain}")
+                    
+                    # Source 1: DexScreener API
+                    logger.info(f"📡 Calling _discover_from_dexscreener for {chain.value}")
+                    dex_candidates = await self._discover_from_dexscreener(
+                        chain, request.limit // len(request.chains), request.min_volume_usd
+                    )
+                    logger.info(f"📊 DexScreener returned {len(dex_candidates)} candidates")
+                    all_candidates.extend(dex_candidates)
+                    
+                    # Source 2: Blockchain Explorer APIs  
+                    logger.info(f"🔍 Calling _discover_from_explorer for {chain.value}")
+                    explorer_candidates = await self._discover_from_explorer(
+                        chain, request.limit // len(request.chains), request.days_back
+                    )
+                    logger.info(f"🔗 Explorer returned {len(explorer_candidates)} candidates")
+                    all_candidates.extend(explorer_candidates)
+                    
+                except Exception as chain_error:
+                    logger.error(f"❌ Error processing chain {chain_str}: {chain_error}")
+                    continue
+            
+            logger.info(f"📈 Total candidates before deduplication: {len(all_candidates)}")
             
             # Remove duplicates and rank by confidence
             unique_candidates = self._remove_duplicates(all_candidates)
+            logger.info(f"🔄 Unique candidates after deduplication: {len(unique_candidates)}")
+            
             ranked_candidates = self._rank_candidates(unique_candidates)
+            logger.info(f"📊 Ranked candidates: {len(ranked_candidates)}")
             
-            # Limit results
-            final_candidates = ranked_candidates[:request.limit]
-            
-            # Convert to API response format
+            # Convert to response format
             response_wallets = []
-            for candidate in final_candidates:
+            for i, candidate in enumerate(ranked_candidates[:request.limit]):
+                logger.info(f"💼 Converting candidate {i+1}: {candidate.address} (confidence: {candidate.confidence_score})")
+                
                 wallet_data = {
                     "id": f"{candidate.chain.value}_{candidate.address}",
                     "address": candidate.address,
@@ -179,18 +195,24 @@ class CopyTradingDiscoveryEngine:
                     "risk_level": self._get_risk_level(candidate.risk_score)
                 }
                 response_wallets.append(wallet_data)
-                
-                # Store in discovered wallets cache
-                key = f"{candidate.chain.value}:{candidate.address}"
-                self.discovered_wallets[key] = candidate
             
-            logger.info(f"Successfully discovered {len(response_wallets)} real traders")
+            logger.info(f"✅ DISCOVERY COMPLETE: Returning {len(response_wallets)} formatted wallets")
             return response_wallets
             
         except Exception as e:
-            logger.error(f"Trader discovery failed: {e}")
-            raise HTTPException(500, f"Discovery failed: {str(e)}")
-    
+            logger.error(f"❌ DISCOVERY FAILED: {str(e)}", exc_info=True)
+            return []
+
+
+
+
+
+
+
+
+
+
+
     async def _discover_from_dexscreener(
         self, 
         chain: ChainType, 
@@ -503,18 +525,36 @@ async def get_discovery_status() -> Dict[str, Any]:
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
+
 @router.post("/discovery/discover-traders")
 async def discover_traders_endpoint(request: DiscoveryRequest) -> Dict[str, Any]:
     """Auto-discover profitable traders with REAL analysis."""
+    
+    # Log the incoming request
+    logger.info(f"🔍 DISCOVERY REQUEST: {request.dict()}")
+    
     try:
-        # Initialize engine if needed
+        # Initialize HTTP client if not already done
         if not discovery_engine.http_client:
             await discovery_engine.initialize()
+            logger.info("✅ Discovery engine HTTP client initialized")
         
-        # Perform real discovery
+        # Log discovery engine state
+        logger.info(f"📊 Discovery engine state: running={discovery_engine.discovery_running}, cached_wallets={len(discovery_engine.discovered_wallets)}")
+        
+        # Call the discovery method with detailed logging
+        logger.info(f"🚀 Starting trader discovery for chains: {request.chains}")
         discovered_wallets = await discovery_engine.discover_traders_real(request)
         
-        return {
+        # Log what we got back
+        logger.info(f"📈 Discovery engine returned {len(discovered_wallets)} wallets")
+        
+        # Log each discovered wallet in detail
+        for i, wallet in enumerate(discovered_wallets):
+            logger.info(f"💰 Wallet {i+1}: {wallet}")
+        
+        # Prepare response
+        response = {
             "status": "ok",
             "discovered_wallets": discovered_wallets,
             "count": len(discovered_wallets),
@@ -522,11 +562,28 @@ async def discover_traders_endpoint(request: DiscoveryRequest) -> Dict[str, Any]
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
+        # Log the final response structure
+        logger.info(f"📤 DISCOVERY RESPONSE: status={response['status']}, count={response['count']}")
+        logger.info(f"📤 Response keys: {list(response.keys())}")
+        
+        return response
+        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Trader discovery failed: {e}")
+        logger.error(f"❌ DISCOVERY ERROR: {str(e)}", exc_info=True)
         raise HTTPException(500, f"Discovery failed: {str(e)}")
+
+
+
+
+
+
+
+
+
+
+
 
 @router.post("/discovery/analyze-wallet")
 async def analyze_wallet_endpoint(request: WalletAnalysisRequest) -> Dict[str, Any]:

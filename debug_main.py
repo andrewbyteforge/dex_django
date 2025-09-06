@@ -29,6 +29,10 @@ import uvicorn
 import uuid
 from fastapi import APIRouter
 
+
+logging.getLogger("api.copy_trading_discovery").setLevel(logging.INFO)
+logging.getLogger("discovery").setLevel(logging.INFO)
+
 # System path setup - Add to path BEFORE importing app modules
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
