@@ -1,632 +1,766 @@
-# APP: backend
-# FILE: dex_django/apps/api/copy_trading_discovery.py
+"""Copy Trading Discovery and Management API with full database integration."""
 from __future__ import annotations
 
-import asyncio
+import json
 import logging
 import random
-from datetime import datetime, timezone, timedelta
+import traceback
+import uuid
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
-from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
-import httpx
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field, validator
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from pydantic import BaseModel, Field
 
-logger = logging.getLogger("api.copy_trading_discovery")
+# Django setup
+import os
+import sys
+import django
 
-# Router
-router = APIRouter(prefix="/api/v1/copy", tags=["copy-trading-discovery"])
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "dex_django.settings")
+django.setup()
 
-# Enums and Data Classes
-class ChainType(Enum):
+from django.db import connection, transaction
+from apps.ledger.models import FollowedTrader
+
+# Initialize logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Create router
+router = APIRouter(prefix="/api/v1/copy", tags=["copy-trading"])
+
+
+# ============================================================================
+# ENUMS AND MODELS
+# ============================================================================
+
+class ChainType(str, Enum):
     """Supported blockchain networks."""
     ETHEREUM = "ethereum"
     BSC = "bsc"
     BASE = "base"
     POLYGON = "polygon"
+    SOLANA = "solana"
 
-class DiscoverySource(Enum):
-    """Data sources for wallet discovery."""
-    DEXSCREENER = "dexscreener"
-    ETHERSCAN = "etherscan"
-    BSCSCAN = "bscscan"
-    BASESCAN = "basescan"
-    POLYGONSCAN = "polygonscan"
 
-@dataclass
-class WalletCandidate:
-    """A potential wallet candidate for copy trading."""
-    address: str
-    chain: ChainType
-    source: DiscoverySource
-    
-    # Performance metrics
-    total_trades: int
-    profitable_trades: int
-    win_rate: float
-    total_volume_usd: Decimal
-    total_pnl_usd: Decimal
-    avg_trade_size_usd: Decimal
-    
-    # Time-based metrics
-    first_trade: datetime
-    last_trade: datetime
-    active_days: int
-    trades_per_day: float
-    
-    # Risk metrics
-    max_drawdown_pct: float
-    largest_loss_usd: Decimal
-    risk_score: float  # 0-100
-    
-    # Quality indicators
-    consistent_profits: bool
-    diverse_tokens: int
-    suspicious_activity: bool
-    
-    # Metadata
-    discovered_at: datetime
-    analysis_period_days: int
-    confidence_score: float  # 0-100
+class CopyMode(str, Enum):
+    """Copy trading modes."""
+    PERCENTAGE = "percentage"
+    FIXED_USD = "fixed_usd"
+    MIRROR = "mirror"
 
-# Request Models
+
+class TraderStatus(str, Enum):
+    """Trader status."""
+    ACTIVE = "active"
+    PAUSED = "paused"
+    MONITORING = "monitoring"
+    BLACKLISTED = "blacklisted"
+
+
+# ============================================================================
+# REQUEST/RESPONSE MODELS
+# ============================================================================
+
 class DiscoveryRequest(BaseModel):
-    """Request to discover top traders."""
-    chains: List[str] = Field(default=["ethereum", "bsc"], description="Chains to search")
-    limit: int = Field(default=20, ge=5, le=100, description="Max number of traders to discover")
-    min_volume_usd: float = Field(default=50000, ge=1000, description="Minimum trading volume")
-    days_back: int = Field(default=30, ge=7, le=90, description="Analysis period in days")
-    auto_add_threshold: float = Field(default=80.0, ge=70.0, le=95.0, description="Auto-add confidence threshold")
-    
-    @validator('chains')
-    def validate_chains(cls, v):
-        valid_chains = {"ethereum", "bsc", "base", "polygon"}
-        for chain in v:
-            if chain not in valid_chains:
-                raise ValueError(f"Invalid chain: {chain}. Must be one of: {valid_chains}")
-        return v
+    """Request model for trader discovery."""
+    chains: List[str] = Field(default=["ethereum", "bsc"])
+    min_quality_score: int = Field(default=70, ge=0, le=100)
+    min_win_rate: float = Field(default=55.0, ge=0, le=100)
+    min_trades: int = Field(default=10, ge=1)
+    limit: int = Field(default=20, ge=1, le=100)
+    days_back: int = Field(default=30, ge=1, le=365)
 
-class WalletAnalysisRequest(BaseModel):
-    """Request to analyze a specific wallet."""
-    address: str = Field(..., min_length=42, max_length=42, description="Wallet address to analyze")
-    chain: str = Field("ethereum", description="Blockchain to analyze on")
-    days_back: int = Field(default=30, ge=7, le=90, description="Analysis period in days")
-    
-    @validator('address')
-    def validate_address(cls, v):
-        if not v.startswith('0x') or len(v) != 42:
-            raise ValueError("Invalid Ethereum address format")
-        return v.lower()
-    
-    @validator('chain')
-    def validate_chain(cls, v):
-        valid_chains = {"ethereum", "bsc", "base", "polygon"}
-        if v not in valid_chains:
-            raise ValueError(f"Invalid chain: {v}")
-        return v
 
-# Real Discovery Engine
+class AddTraderRequest(BaseModel):
+    """Request model for adding a trader."""
+    wallet_address: str
+    trader_name: Optional[str] = None
+    description: Optional[str] = None
+    chain: str = "ethereum"
+    copy_mode: str = "percentage"
+    copy_percentage: float = Field(default=10.0, ge=1.0, le=100.0)
+    fixed_amount_usd: Optional[float] = Field(None, ge=10.0)
+    max_position_usd: float = Field(default=1000.0, ge=10.0)
+    min_trade_value_usd: float = Field(default=50.0, ge=10.0)
+    max_slippage_bps: int = Field(default=100, ge=10, le=1000)
+    allowed_chains: Optional[List[str]] = None
+    copy_buy_only: bool = False
+    copy_sell_only: bool = False
+    is_active: bool = True
+
+
+class WalletCandidate(BaseModel):
+    """Model for discovered wallet candidates."""
+    wallet_address: str
+    chain: ChainType
+    quality_score: float
+    confidence_score: float
+    win_rate: float
+    total_trades: int
+    total_volume_usd: float
+    avg_trade_size_usd: float
+    profitable_trades: int
+    risk_score: float
+    discovery_reason: str
+    discovered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ============================================================================
+# DISCOVERY ENGINE
+# ============================================================================
+
 class CopyTradingDiscoveryEngine:
-    """
-    Real trader discovery engine that connects to blockchain APIs.
-    """
+    """Enhanced discovery engine with real wallet simulation."""
     
     def __init__(self):
-        self.http_client = None
+        """Initialize the discovery engine."""
         self.discovered_wallets: Dict[str, WalletCandidate] = {}
         self.discovery_running = False
-        
-    async def initialize(self):
-        """Initialize HTTP client and connections."""
-        self.http_client = httpx.AsyncClient(timeout=30.0)
-        logger.info("Discovery engine initialized")
+        logger.info("Copy Trading Discovery Engine initialized")
     
-    async def cleanup(self):
-        """Cleanup resources."""
-        if self.http_client:
-            await self.http_client.aclose()
-    
-    async def discover_traders_real(self, request: DiscoveryRequest) -> List[Dict[str, Any]]:
-        """Perform REAL trader discovery using multiple data sources."""
-        logger.info(f"🔍 STARTING discover_traders_real: chains={request.chains}, limit={request.limit}")
-        
-        try:
-            all_candidates = []
-            
-            # Discovery from multiple sources
-            for chain_str in request.chains:
-                logger.info(f"🔗 Processing chain: {chain_str}")
-                
-                try:
-                    chain = ChainType(chain_str)
-                    logger.info(f"✅ Chain enum created: {chain}")
-                    
-                    # Source 1: DexScreener API
-                    logger.info(f"📡 Calling _discover_from_dexscreener for {chain.value}")
-                    dex_candidates = await self._discover_from_dexscreener(
-                        chain, request.limit // len(request.chains), request.min_volume_usd
-                    )
-                    logger.info(f"📊 DexScreener returned {len(dex_candidates)} candidates")
-                    all_candidates.extend(dex_candidates)
-                    
-                    # Source 2: Blockchain Explorer APIs  
-                    logger.info(f"🔍 Calling _discover_from_explorer for {chain.value}")
-                    explorer_candidates = await self._discover_from_explorer(
-                        chain, request.limit // len(request.chains), request.days_back
-                    )
-                    logger.info(f"🔗 Explorer returned {len(explorer_candidates)} candidates")
-                    all_candidates.extend(explorer_candidates)
-                    
-                except Exception as chain_error:
-                    logger.error(f"❌ Error processing chain {chain_str}: {chain_error}")
-                    continue
-            
-            logger.info(f"📈 Total candidates before deduplication: {len(all_candidates)}")
-            
-            # Remove duplicates and rank by confidence
-            unique_candidates = self._remove_duplicates(all_candidates)
-            logger.info(f"🔄 Unique candidates after deduplication: {len(unique_candidates)}")
-            
-            ranked_candidates = self._rank_candidates(unique_candidates)
-            logger.info(f"📊 Ranked candidates: {len(ranked_candidates)}")
-            
-            # Convert to response format
-            response_wallets = []
-            for i, candidate in enumerate(ranked_candidates[:request.limit]):
-                logger.info(f"💼 Converting candidate {i+1}: {candidate.address} (confidence: {candidate.confidence_score})")
-                
-                wallet_data = {
-                    "id": f"{candidate.chain.value}_{candidate.address}",
-                    "address": candidate.address,
-                    "chain": candidate.chain.value,
-                    "source": candidate.source.value,
-                    "quality_score": int(candidate.confidence_score),
-                    "total_volume_usd": float(candidate.total_volume_usd),
-                    "win_rate": candidate.win_rate,
-                    "trades_count": candidate.total_trades,
-                    "avg_trade_size_usd": float(candidate.avg_trade_size_usd),
-                    "risk_score": candidate.risk_score,
-                    "last_active": candidate.last_trade.isoformat(),
-                    "recommended_copy_percentage": self._calculate_recommended_percentage(candidate),
-                    "confidence": candidate.confidence_score,
-                    "risk_level": self._get_risk_level(candidate.risk_score)
-                }
-                response_wallets.append(wallet_data)
-            
-            logger.info(f"✅ DISCOVERY COMPLETE: Returning {len(response_wallets)} formatted wallets")
-            return response_wallets
-            
-        except Exception as e:
-            logger.error(f"❌ DISCOVERY FAILED: {str(e)}", exc_info=True)
-            return []
-
-
-
-
-
-
-
-
-
-
-
-    async def _discover_from_dexscreener(
-        self, 
-        chain: ChainType, 
-        limit: int, 
-        min_volume_usd: float
-    ) -> List[WalletCandidate]:
-        """Discover traders from DexScreener API data."""
-        candidates = []
-        
-        try:
-            # Map chains to DexScreener format
-            chain_mapping = {
-                ChainType.ETHEREUM: "ethereum",
-                ChainType.BSC: "bsc", 
-                ChainType.BASE: "base",
-                ChainType.POLYGON: "polygon"
-            }
-            
-            if chain not in chain_mapping:
-                return candidates
-            
-            # Get trending tokens (real API call)
-            url = f"https://api.dexscreener.com/latest/dex/search/?q={chain_mapping[chain]}"
-            
-            if self.http_client:
-                try:
-                    response = await self.http_client.get(url)
-                    if response.status_code == 200:
-                        data = response.json()
-                        pairs = data.get("pairs", [])[:10]  # Top 10 pairs
-                        
-                        # For each high-volume pair, generate realistic trader candidates
-                        for pair in pairs:
-                            volume_24h = float(pair.get("volume", {}).get("h24", 0))
-                            if volume_24h >= min_volume_usd:
-                                # Generate 2-3 realistic candidates per high-volume pair
-                                for i in range(random.randint(2, 3)):
-                                    candidate = self._create_realistic_candidate(
-                                        chain, DiscoverySource.DEXSCREENER, volume_24h
-                                    )
-                                    candidates.append(candidate)
-                                    
-                                    if len(candidates) >= limit:
-                                        break
-                            
-                            if len(candidates) >= limit:
-                                break
-                                
-                except Exception as api_error:
-                    logger.warning(f"DexScreener API failed, using fallback: {api_error}")
-                    # Fallback to realistic mock data if API fails
-                    candidates = self._generate_fallback_candidates(chain, limit)
-            else:
-                # Fallback if no HTTP client
-                candidates = self._generate_fallback_candidates(chain, limit)
-                
-            logger.info(f"DexScreener discovery found {len(candidates)} candidates for {chain.value}")
-            
-        except Exception as e:
-            logger.error(f"DexScreener discovery failed: {e}")
-            # Generate fallback candidates on error
-            candidates = self._generate_fallback_candidates(chain, limit)
-        
-        return candidates
-    
-    async def _discover_from_explorer(
+    async def discover_traders(
         self,
-        chain: ChainType,
-        limit: int, 
-        days_back: int
+        chains: List[str],
+        min_quality_score: int = 70,
+        min_win_rate: float = 55.0,
+        min_trades: int = 10,
+        limit: int = 20,
+        days_back: int = 30
     ) -> List[WalletCandidate]:
-        """Discover traders from blockchain explorer APIs."""
-        candidates = []
+        """
+        Discover profitable traders (simulated with realistic data).
+        
+        Args:
+            chains: List of chains to search
+            min_quality_score: Minimum quality score
+            min_win_rate: Minimum win rate percentage
+            min_trades: Minimum number of trades
+            limit: Maximum traders to return
+            days_back: Days of history to analyze
+            
+        Returns:
+            List of discovered wallet candidates
+        """
+        logger.info(f"Starting trader discovery: chains={chains}, limit={limit}")
         
         try:
-            # This would use real explorer APIs like Etherscan, BSCScan etc.
-            # For now, generate realistic candidates based on chain characteristics
+            self.discovery_running = True
+            candidates = []
             
-            base_candidates = limit // 2  # Generate half the limit from explorer data
-            for i in range(base_candidates):
-                candidate = self._create_realistic_candidate(
-                    chain, DiscoverySource.ETHERSCAN, None
+            # Simulate discovering wallets with realistic patterns
+            for i in range(min(limit, 50)):
+                chain = random.choice(chains) if chains else "ethereum"
+                
+                # Generate realistic trader metrics
+                win_rate = random.uniform(min_win_rate, 85.0)
+                total_trades = random.randint(min_trades, 500)
+                profitable_trades = int(total_trades * (win_rate / 100))
+                
+                # Quality score based on multiple factors
+                quality_score = self._calculate_quality_score(
+                    win_rate=win_rate,
+                    total_trades=total_trades,
+                    days_back=days_back
                 )
-                candidates.append(candidate)
+                
+                if quality_score < min_quality_score:
+                    continue
+                
+                wallet = WalletCandidate(
+                    wallet_address=self._generate_wallet_address(),
+                    chain=ChainType(chain.lower()),
+                    quality_score=quality_score,
+                    confidence_score=random.uniform(65, 95),
+                    win_rate=win_rate,
+                    total_trades=total_trades,
+                    total_volume_usd=random.uniform(10000, 1000000),
+                    avg_trade_size_usd=random.uniform(100, 10000),
+                    profitable_trades=profitable_trades,
+                    risk_score=random.uniform(2, 8),
+                    discovery_reason=self._get_discovery_reason(quality_score, win_rate)
+                )
+                
+                candidates.append(wallet)
+                self.discovered_wallets[wallet.wallet_address] = wallet
             
-            logger.info(f"Explorer discovery found {len(candidates)} candidates for {chain.value}")
+            # Sort by quality score
+            candidates.sort(key=lambda x: x.quality_score, reverse=True)
+            candidates = candidates[:limit]
+            
+            logger.info(f"Discovered {len(candidates)} traders meeting criteria")
+            return candidates
             
         except Exception as e:
-            logger.error(f"Explorer discovery failed: {e}")
-        
-        return candidates
+            logger.error(f"Error in trader discovery: {e}")
+            logger.error(traceback.format_exc())
+            raise
+        finally:
+            self.discovery_running = False
     
-    def _create_realistic_candidate(
-        self, 
-        chain: ChainType, 
-        source: DiscoverySource,
-        volume_hint: Optional[float] = None
-    ) -> WalletCandidate:
-        """Create a realistic wallet candidate with proper metrics."""
-        
-        # Generate realistic wallet address
-        address = f"0x{''.join(random.choices('0123456789abcdef', k=40))}"
-        
-        # Performance metrics based on chain characteristics
-        if chain == ChainType.ETHEREUM:
-            base_volume = random.uniform(100000, 500000)
-            base_trades = random.randint(50, 200)
-        elif chain == ChainType.BSC:
-            base_volume = random.uniform(50000, 200000) 
-            base_trades = random.randint(80, 300)
-        else:  # BASE, POLYGON
-            base_volume = random.uniform(25000, 150000)
-            base_trades = random.randint(60, 250)
-        
-        if volume_hint:
-            base_volume = max(base_volume, volume_hint * random.uniform(0.01, 0.05))
-        
-        total_trades = base_trades
-        profitable_trades = int(total_trades * random.uniform(0.55, 0.85))
-        win_rate = (profitable_trades / total_trades) * 100
-        
-        total_volume_usd = Decimal(str(base_volume))
-        total_pnl_usd = Decimal(str(base_volume * random.uniform(0.05, 0.25)))
-        avg_trade_size_usd = total_volume_usd / total_trades
-        
-        # Time metrics
-        days_active = random.randint(30, 180)
-        first_trade = datetime.now(timezone.utc) - timedelta(days=days_active)
-        last_trade = datetime.now(timezone.utc) - timedelta(hours=random.randint(1, 48))
-        trades_per_day = total_trades / days_active
-        
-        # Risk metrics
-        max_drawdown_pct = random.uniform(5, 25)
-        largest_loss_usd = Decimal(str(float(avg_trade_size_usd) * random.uniform(2, 8)))
-        risk_score = random.uniform(20, 70)
-        
-        # Quality indicators
-        consistent_profits = win_rate > 65 and max_drawdown_pct < 20
-        diverse_tokens = random.randint(5, 25)
-        suspicious_activity = False  # Always false for discovered candidates
-        
-        # Calculate confidence score
-        confidence_score = self._calculate_confidence_score(
-            win_rate, risk_score, consistent_profits, total_trades
-        )
-        
-        return WalletCandidate(
-            address=address,
-            chain=chain,
-            source=source,
-            total_trades=total_trades,
-            profitable_trades=profitable_trades, 
-            win_rate=win_rate,
-            total_volume_usd=total_volume_usd,
-            total_pnl_usd=total_pnl_usd,
-            avg_trade_size_usd=avg_trade_size_usd,
-            first_trade=first_trade,
-            last_trade=last_trade,
-            active_days=days_active,
-            trades_per_day=trades_per_day,
-            max_drawdown_pct=max_drawdown_pct,
-            largest_loss_usd=largest_loss_usd,
-            risk_score=risk_score,
-            consistent_profits=consistent_profits,
-            diverse_tokens=diverse_tokens,
-            suspicious_activity=suspicious_activity,
-            discovered_at=datetime.now(timezone.utc),
-            analysis_period_days=30,
-            confidence_score=confidence_score
-        )
-    
-    def _generate_fallback_candidates(self, chain: ChainType, limit: int) -> List[WalletCandidate]:
-        """Generate fallback candidates when APIs fail."""
-        candidates = []
-        for i in range(limit):
-            candidate = self._create_realistic_candidate(
-                chain, DiscoverySource.ETHERSCAN, None
-            )
-            candidates.append(candidate)
-        return candidates
-    
-    def _calculate_confidence_score(
-        self, 
-        win_rate: float, 
-        risk_score: float, 
-        consistent_profits: bool,
-        total_trades: int
+    def _calculate_quality_score(
+        self,
+        win_rate: float,
+        total_trades: int,
+        days_back: int
     ) -> float:
-        """Calculate confidence score based on multiple factors."""
+        """
+        Calculate trader quality score.
         
-        score = 0.0
+        Args:
+            win_rate: Win rate percentage
+            total_trades: Total number of trades
+            days_back: Days of history analyzed
+            
+        Returns:
+            Quality score (0-100)
+        """
+        # Weight factors
+        win_rate_weight = 0.4
+        trade_frequency_weight = 0.3
+        consistency_weight = 0.3
         
-        # Win rate component (0-40 points)
-        score += min(win_rate * 0.5, 40)
+        # Normalize metrics
+        win_rate_score = min(win_rate / 100, 1.0) * 100
+        trade_freq_score = min(total_trades / (days_back * 5), 1.0) * 100  # 5 trades/day is max
+        consistency_score = random.uniform(60, 95)  # Simulated consistency
         
-        # Risk score component (0-30 points, inverted)
-        score += max(30 - (risk_score * 0.4), 0)
+        quality_score = (
+            win_rate_score * win_rate_weight +
+            trade_freq_score * trade_frequency_weight +
+            consistency_score * consistency_weight
+        )
         
-        # Consistency bonus (0-15 points)
-        if consistent_profits:
-            score += 15
-        
-        # Trade count component (0-15 points)
-        score += min(total_trades * 0.1, 15)
-        
-        return min(score, 100.0)
+        return round(quality_score, 2)
     
-    def _calculate_recommended_percentage(self, candidate: WalletCandidate) -> float:
-        """Calculate recommended copy percentage based on risk/reward."""
-        
-        base_percentage = 2.0
-        
-        # Adjust based on confidence score
-        if candidate.confidence_score > 80:
-            base_percentage = 3.5
-        elif candidate.confidence_score > 70:
-            base_percentage = 2.5
-        
-        # Adjust based on risk score
-        if candidate.risk_score > 50:
-            base_percentage *= 0.7
-        elif candidate.risk_score < 30:
-            base_percentage *= 1.2
-        
-        return round(min(base_percentage, 5.0), 1)
+    def _generate_wallet_address(self) -> str:
+        """Generate a realistic wallet address."""
+        return "0x" + "".join(random.choices("0123456789abcdef", k=40))
     
-    def _get_risk_level(self, risk_score: float) -> str:
-        """Get risk level string from score."""
-        if risk_score < 30:
-            return "low"
-        elif risk_score < 60:
-            return "medium" 
+    def _get_discovery_reason(self, quality_score: float, win_rate: float) -> str:
+        """Get discovery reason based on metrics."""
+        if quality_score >= 90:
+            return "Elite trader - exceptional performance metrics"
+        elif quality_score >= 80:
+            return "High-quality trader with consistent profits"
+        elif win_rate >= 70:
+            return "High win rate trader"
         else:
-            return "high"
-    
-    def _remove_duplicates(self, candidates: List[WalletCandidate]) -> List[WalletCandidate]:
-        """Remove duplicate wallet candidates."""
-        seen = set()
-        unique_candidates = []
-        
-        for candidate in candidates:
-            key = f"{candidate.chain.value}:{candidate.address}"
-            if key not in seen:
-                seen.add(key)
-                unique_candidates.append(candidate)
-        
-        return unique_candidates
-    
-    def _rank_candidates(self, candidates: List[WalletCandidate]) -> List[WalletCandidate]:
-        """Rank candidates by confidence score."""
-        return sorted(candidates, key=lambda c: c.confidence_score, reverse=True)
+            return "Profitable trader meeting minimum criteria"
+
 
 # Global engine instance
 discovery_engine = CopyTradingDiscoveryEngine()
 
-# API Endpoints
+
+# ============================================================================
+# API ENDPOINTS
+# ============================================================================
+
 @router.get("/status")
 async def get_copy_trading_status() -> Dict[str, Any]:
-    """Get copy trading system status."""
-    return {
-        "status": "ok",
-        "is_enabled": True,
-        "monitoring_active": False,
-        "followed_traders_count": len(discovery_engine.discovered_wallets),
-        "active_copies_today": 0,
-        "total_copies": 0,
-        "win_rate_pct": 0.0,
-        "total_pnl_usd": "0.00",
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
-
-@router.get("/traders")
-async def get_followed_traders() -> Dict[str, Any]:
-    """Get list of followed traders."""
-    return {
-        "status": "ok",
-        "data": [],
-        "count": 0,
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
-
-@router.get("/trades") 
-async def get_copy_trades() -> Dict[str, Any]:
-    """Get copy trading history."""
-    return {
-        "status": "ok",
-        "data": [],
-        "count": 0,
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
-
-@router.get("/discovery/status")
-async def get_discovery_status() -> Dict[str, Any]:
-    """Get discovery system status."""
-    return {
-        "status": "ok",
-        "discovery_running": discovery_engine.discovery_running,
-        "total_discovered": len(discovery_engine.discovered_wallets),
-        "high_confidence_candidates": len([
-            w for w in discovery_engine.discovered_wallets.values() 
-            if w.confidence_score >= 80
-        ]),
-        "discovered_by_chain": {
-            "ethereum": len([w for w in discovery_engine.discovered_wallets.values() if w.chain == ChainType.ETHEREUM]),
-            "bsc": len([w for w in discovery_engine.discovered_wallets.values() if w.chain == ChainType.BSC]),
-            "base": len([w for w in discovery_engine.discovered_wallets.values() if w.chain == ChainType.BASE]),
-            "polygon": len([w for w in discovery_engine.discovered_wallets.values() if w.chain == ChainType.POLYGON])
-        },
-        "last_discovery_run": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
-
-
-@router.post("/discovery/discover-traders")
-async def discover_traders_endpoint(request: DiscoveryRequest) -> Dict[str, Any]:
-    """Auto-discover profitable traders with REAL analysis."""
+    """
+    Get copy trading system status.
     
-    # Log the incoming request
-    logger.info(f"🔍 DISCOVERY REQUEST: {request.dict()}")
-    
+    Returns:
+        System status with trader counts and metrics
+    """
     try:
-        # Initialize HTTP client if not already done
-        if not discovery_engine.http_client:
-            await discovery_engine.initialize()
-            logger.info("✅ Discovery engine HTTP client initialized")
+        logger.info("Getting copy trading status")
         
-        # Log discovery engine state
-        logger.info(f"📊 Discovery engine state: running={discovery_engine.discovery_running}, cached_wallets={len(discovery_engine.discovered_wallets)}")
+        # Get trader counts from database
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT 
+                    COUNT(*) as total,
+                    COUNT(CASE WHEN is_active = 1 THEN 1 END) as active,
+                    SUM(total_pnl_usd) as total_pnl,
+                    AVG(win_rate_pct) as avg_win_rate
+                FROM ledger_followedtrader
+            """)
+            row = cursor.fetchone()
+            
+            total_traders = row[0] or 0
+            active_traders = row[1] or 0
+            total_pnl = float(row[2] or 0)
+            avg_win_rate = float(row[3] or 0)
         
-        # Call the discovery method with detailed logging
-        logger.info(f"🚀 Starting trader discovery for chains: {request.chains}")
-        discovered_wallets = await discovery_engine.discover_traders_real(request)
-        
-        # Log what we got back
-        logger.info(f"📈 Discovery engine returned {len(discovered_wallets)} wallets")
-        
-        # Log each discovered wallet in detail
-        for i, wallet in enumerate(discovered_wallets):
-            logger.info(f"💰 Wallet {i+1}: {wallet}")
-        
-        # Prepare response
-        response = {
+        return {
             "status": "ok",
-            "discovered_wallets": discovered_wallets,
-            "count": len(discovered_wallets),
-            "discovery_params": request.dict(),
+            "is_enabled": True,
+            "monitoring_active": active_traders > 0,
+            "followed_traders_count": total_traders,
+            "active_traders_count": active_traders,
+            "discovered_wallets_count": len(discovery_engine.discovered_wallets),
+            "active_copies_today": 0,  # Would need copy trades table
+            "total_copies": 0,  # Would need copy trades table
+            "win_rate_pct": round(avg_win_rate, 2),
+            "total_pnl_usd": f"{total_pnl:.2f}",
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
-        # Log the final response structure
-        logger.info(f"📤 DISCOVERY RESPONSE: status={response['status']}, count={response['count']}")
-        logger.info(f"📤 Response keys: {list(response.keys())}")
+    except Exception as e:
+        logger.error(f"Error getting status: {e}")
+        logger.error(traceback.format_exc())
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+
+@router.get("/traders")
+async def get_followed_traders(
+    status: Optional[str] = Query(None, description="Filter by status"),
+    chain: Optional[str] = Query(None, description="Filter by chain"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500)
+) -> Dict[str, Any]:
+    """
+    Get list of followed traders from database.
+    
+    Args:
+        status: Optional status filter
+        chain: Optional chain filter
+        skip: Pagination offset
+        limit: Maximum records to return
         
-        return response
+    Returns:
+        List of traders with metadata
+    """
+    try:
+        logger.info(f"Getting followed traders: status={status}, chain={chain}, skip={skip}, limit={limit}")
+        
+        # Build query
+        query = FollowedTrader.objects.all()
+        
+        # Apply filters
+        if status:
+            if status == "active":
+                query = query.filter(is_active=True, status="active")
+            elif status == "paused":
+                query = query.filter(is_active=False)
+            elif status != "all":
+                query = query.filter(status=status)
+        
+        if chain:
+            query = query.filter(chain=chain.lower())
+        
+        # Get total count
+        total_count = query.count()
+        
+        # Apply pagination
+        traders = query.order_by("-created_at")[skip:skip + limit]
+        
+        # Convert to response format
+        traders_data = []
+        for trader in traders:
+            # Parse allowed_chains
+            allowed_chains = trader.allowed_chains
+            if isinstance(allowed_chains, str):
+                try:
+                    allowed_chains = json.loads(allowed_chains)
+                except json.JSONDecodeError:
+                    allowed_chains = [trader.chain]
+            elif not allowed_chains:
+                allowed_chains = [trader.chain]
+            
+            trader_dict = {
+                "id": str(trader.id),
+                "wallet_address": trader.wallet_address,
+                "trader_name": trader.trader_name,
+                "description": trader.description,
+                "chain": trader.chain,
+                "copy_mode": trader.copy_mode,
+                "copy_percentage": float(trader.copy_percentage),
+                "fixed_amount_usd": float(trader.fixed_amount_usd) if trader.fixed_amount_usd else None,
+                "max_position_usd": float(trader.max_position_usd),
+                "min_trade_value_usd": float(trader.min_trade_value_usd),
+                "max_slippage_bps": trader.max_slippage_bps,
+                "allowed_chains": allowed_chains,
+                "copy_buy_only": trader.copy_buy_only,
+                "copy_sell_only": trader.copy_sell_only,
+                "status": trader.status,
+                "is_active": trader.is_active,
+                "quality_score": trader.quality_score,
+                "total_pnl_usd": float(trader.total_pnl_usd),
+                "win_rate_pct": float(trader.win_rate_pct),
+                "total_trades": trader.total_trades,
+                "avg_trade_size_usd": float(trader.avg_trade_size_usd),
+                "last_activity_at": trader.last_activity_at.isoformat() if trader.last_activity_at else None,
+                "created_at": trader.created_at.isoformat(),
+                "updated_at": trader.updated_at.isoformat()
+            }
+            traders_data.append(trader_dict)
+        
+        logger.info(f"Retrieved {len(traders_data)} traders (total: {total_count})")
+        
+        return {
+            "status": "ok",
+            "data": traders_data,
+            "count": len(traders_data),
+            "total": total_count,
+            "skip": skip,
+            "limit": limit,
+            "has_more": (skip + limit) < total_count,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting traders: {e}")
+        logger.error(traceback.format_exc())
+        return {
+            "status": "error",
+            "error": str(e),
+            "data": [],
+            "count": 0,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+
+@router.post("/traders")
+async def add_followed_trader(request: AddTraderRequest) -> Dict[str, Any]:
+    """
+    Add a new trader to follow.
+    
+    Args:
+        request: Trader configuration
+        
+    Returns:
+        Success response with trader ID
+    """
+    try:
+        logger.info(f"Adding trader: {request.wallet_address}")
+        
+        # Prepare allowed_chains
+        allowed_chains = request.allowed_chains or [request.chain]
+        allowed_chains_json = json.dumps(allowed_chains)
+        
+        # Generate trader name if not provided
+        trader_name = request.trader_name or f"Trader {request.wallet_address[:8]}"
+        
+        # Create trader with Django ORM
+        with transaction.atomic():
+            trader = FollowedTrader.objects.create(
+                wallet_address=request.wallet_address.lower(),
+                trader_name=trader_name,
+                description=request.description or "",
+                chain=request.chain.lower(),
+                copy_mode=request.copy_mode,
+                copy_percentage=Decimal(str(request.copy_percentage)),
+                fixed_amount_usd=Decimal(str(request.fixed_amount_usd)) if request.fixed_amount_usd else None,
+                max_position_usd=Decimal(str(request.max_position_usd)),
+                min_trade_value_usd=Decimal(str(request.min_trade_value_usd)),
+                max_slippage_bps=request.max_slippage_bps,
+                allowed_chains=allowed_chains_json,
+                copy_buy_only=request.copy_buy_only,
+                copy_sell_only=request.copy_sell_only,
+                status="active" if request.is_active else "paused",
+                is_active=request.is_active,
+                quality_score=None,  # Will be calculated later
+                total_pnl_usd=Decimal("0.00"),
+                win_rate_pct=Decimal("0.00"),
+                total_trades=0,
+                avg_trade_size_usd=Decimal("0.00"),
+                last_activity_at=None
+            )
+            
+            logger.info(f"Successfully added trader {trader.id}: {request.wallet_address}")
+            
+            return {
+                "status": "ok",
+                "message": f"Successfully added trader {trader_name}",
+                "trader_id": str(trader.id),
+                "wallet_address": trader.wallet_address,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+    except Exception as e:
+        logger.error(f"Error adding trader: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to add trader: {str(e)}")
+
+
+@router.delete("/traders/{trader_id}")
+async def remove_followed_trader(trader_id: str) -> Dict[str, Any]:
+    """
+    Remove a followed trader.
+    
+    Args:
+        trader_id: ID of trader to remove
+        
+    Returns:
+        Success confirmation
+    """
+    try:
+        logger.info(f"Removing trader: {trader_id}")
+        
+        trader = FollowedTrader.objects.filter(id=trader_id).first()
+        if not trader:
+            raise HTTPException(status_code=404, detail="Trader not found")
+        
+        wallet_address = trader.wallet_address
+        trader.delete()
+        
+        logger.info(f"Successfully removed trader {trader_id}: {wallet_address}")
+        
+        return {
+            "status": "ok",
+            "message": f"Successfully removed trader",
+            "trader_id": trader_id,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ DISCOVERY ERROR: {str(e)}", exc_info=True)
-        raise HTTPException(500, f"Discovery failed: {str(e)}")
+        logger.error(f"Error removing trader: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to remove trader: {str(e)}")
 
 
-
-
-
-
-
-
-
-
-
-
-@router.post("/discovery/analyze-wallet")
-async def analyze_wallet_endpoint(request: WalletAnalysisRequest) -> Dict[str, Any]:
-    """Analyze a specific wallet for copy trading suitability."""
-    try:
-        # This would perform real wallet analysis
-        # For now, return a realistic analysis structure
+@router.patch("/traders/{trader_id}")
+async def update_followed_trader(
+    trader_id: str,
+    updates: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Update a followed trader's settings.
+    
+    Args:
+        trader_id: ID of trader to update
+        updates: Dictionary of fields to update
         
-        analysis_result = {
-            "address": request.address,
-            "chain": request.chain,
-            "analysis_period_days": request.days_back,
-            "qualified": True,
-            "confidence_score": random.uniform(60, 90),
-            "win_rate": random.uniform(55, 85),
-            "total_trades": random.randint(50, 200),
-            "total_volume_usd": random.uniform(25000, 200000),
-            "risk_score": random.uniform(20, 60),
-            "recommendation": "recommended",
-            "recommended_copy_percentage": random.uniform(1.5, 4.0),
-            "strengths": ["Consistent profitability", "Good risk management"],
-            "risks": ["Medium volatility exposure"],
-            "trading_style": "swing_trader"
-        }
+    Returns:
+        Updated trader data
+    """
+    try:
+        logger.info(f"Updating trader {trader_id}: {updates}")
+        
+        trader = FollowedTrader.objects.filter(id=trader_id).first()
+        if not trader:
+            raise HTTPException(status_code=404, detail="Trader not found")
+        
+        # Update allowed fields
+        allowed_fields = [
+            "trader_name", "description", "copy_mode", "copy_percentage",
+            "fixed_amount_usd", "max_position_usd", "min_trade_value_usd",
+            "max_slippage_bps", "allowed_chains", "copy_buy_only",
+            "copy_sell_only", "status", "is_active"
+        ]
+        
+        for field, value in updates.items():
+            if field in allowed_fields:
+                if field == "allowed_chains" and isinstance(value, list):
+                    value = json.dumps(value)
+                elif field in ["copy_percentage", "fixed_amount_usd", "max_position_usd", 
+                             "min_trade_value_usd"] and value is not None:
+                    value = Decimal(str(value))
+                
+                setattr(trader, field, value)
+        
+        trader.save()
+        
+        logger.info(f"Successfully updated trader {trader_id}")
         
         return {
             "status": "ok",
-            "analysis": analysis_result,
+            "message": "Trader updated successfully",
+            "trader_id": trader_id,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating trader: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to update trader: {str(e)}")
+
+
+@router.get("/trades")
+async def get_copy_trades(
+    trader_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=500)
+) -> Dict[str, Any]:
+    """
+    Get copy trading history.
+    
+    Args:
+        trader_id: Optional filter by trader
+        status: Optional filter by status
+        skip: Pagination offset
+        limit: Maximum records
+        
+    Returns:
+        List of copy trades
+    """
+    try:
+        logger.info(f"Getting copy trades: trader_id={trader_id}, status={status}")
+        
+        # For now, return empty as copy trades table doesn't exist yet
+        # This would query the CopyTrade model when implemented
+        
+        return {
+            "status": "ok",
+            "data": [],
+            "count": 0,
+            "total": 0,
+            "skip": skip,
+            "limit": limit,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
     except Exception as e:
-        logger.error(f"Wallet analysis failed for {request.address}: {e}")
-        raise HTTPException(500, f"Analysis failed: {str(e)}")
+        logger.error(f"Error getting trades: {e}")
+        logger.error(traceback.format_exc())
+        return {
+            "status": "error",
+            "error": str(e),
+            "data": [],
+            "count": 0,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
 
-# Health endpoint
+
+@router.get("/discovery/status")
+async def get_discovery_status() -> Dict[str, Any]:
+    """
+    Get discovery system status.
+    
+    Returns:
+        Discovery system metrics
+    """
+    try:
+        logger.info("Getting discovery status")
+        
+        discovered_by_chain = {}
+        for wallet in discovery_engine.discovered_wallets.values():
+            chain = wallet.chain.value
+            discovered_by_chain[chain] = discovered_by_chain.get(chain, 0) + 1
+        
+        high_confidence = len([
+            w for w in discovery_engine.discovered_wallets.values()
+            if w.confidence_score >= 80
+        ])
+        
+        return {
+            "status": "ok",
+            "discovery_running": discovery_engine.discovery_running,
+            "total_discovered": len(discovery_engine.discovered_wallets),
+            "high_confidence_candidates": high_confidence,
+            "discovered_by_chain": discovered_by_chain,
+            "last_discovery_run": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting discovery status: {e}")
+        logger.error(traceback.format_exc())
+        return {
+            "status": "error",
+            "error": str(e),
+            "discovery_running": False,
+            "total_discovered": 0,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+
+@router.post("/discovery/discover-traders")
+async def discover_traders_endpoint(request: DiscoveryRequest) -> Dict[str, Any]:
+    """
+    Auto-discover profitable traders.
+    
+    Args:
+        request: Discovery configuration
+        
+    Returns:
+        List of discovered traders
+    """
+    try:
+        logger.info(f"Starting trader discovery: {request.dict()}")
+        
+        candidates = await discovery_engine.discover_traders(
+            chains=request.chains,
+            min_quality_score=request.min_quality_score,
+            min_win_rate=request.min_win_rate,
+            min_trades=request.min_trades,
+            limit=request.limit,
+            days_back=request.days_back
+        )
+        
+        logger.info(f"Discovered {len(candidates)} traders meeting criteria")
+        
+        # Convert to dict format
+        candidates_data = [
+            {
+                "wallet_address": c.wallet_address,
+                "chain": c.chain.value,
+                "quality_score": c.quality_score,
+                "confidence_score": c.confidence_score,
+                "win_rate": c.win_rate,
+                "total_trades": c.total_trades,
+                "total_volume_usd": c.total_volume_usd,
+                "avg_trade_size_usd": c.avg_trade_size_usd,
+                "profitable_trades": c.profitable_trades,
+                "risk_score": c.risk_score,
+                "discovery_reason": c.discovery_reason,
+                "discovered_at": c.discovered_at.isoformat()
+            }
+            for c in candidates
+        ]
+        
+        return {
+            "status": "ok",
+            "data": candidates_data,
+            "count": len(candidates_data),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in trader discovery: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Discovery failed: {str(e)}")
+
+
 @router.get("/health")
-async def copy_trading_health() -> Dict[str, Any]:
-    """Health check for copy trading discovery system."""
-    return {
-        "status": "ok",
-        "service": "copy_trading_discovery",
-        "engine_initialized": discovery_engine.http_client is not None,
-        "discovered_wallets_count": len(discovery_engine.discovered_wallets),
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
+async def health_check() -> Dict[str, Any]:
+    """
+    Health check endpoint.
+    
+    Returns:
+        Health status
+    """
+    try:
+        # Check database connection
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        
+        return {
+            "status": "healthy",
+            "service": "copy-trading",
+            "database": "connected",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {
+            "status": "unhealthy",
+            "service": "copy-trading",
+            "database": "error",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+
+# Export router
+__all__ = ["router"]

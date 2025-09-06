@@ -163,28 +163,49 @@ export function CopyTradingTab() {
         }
     };
 
+    // Updated loadFollowedTraders function for CopyTradingTab.jsx
+    // Replace the existing loadFollowedTraders function with this one:
+
     const loadFollowedTraders = async () => {
         try {
             const response = await copyTradingApi.getTraders();
-            if (response.status === 'ok' && response.data) {
-                const formattedTraders = response.data.map(trader => ({
-                    id: trader.id,
-                    wallet_address: trader.wallet_address,
-                    trader_name: trader.trader_name,
-                    description: trader.description,
-                    chain: trader.chain,
-                    copy_percentage: parseFloat(trader.copy_percentage || 0),
-                    max_position_usd: parseFloat(trader.max_position_usd || 0),
-                    status: trader.status,
-                    quality_score: parseInt(trader.quality_score || 0),
-                    total_pnl: parseFloat(trader.total_pnl_usd || 0),
-                    win_rate: parseFloat(trader.win_rate_pct || 0),
-                    total_trades: parseInt(trader.total_trades || 0),
-                    avg_trade_size: parseFloat(trader.avg_trade_size_usd || 0),
-                    last_activity_at: trader.last_activity_at,
-                    created_at: trader.created_at
-                }));
-                setFollowedTraders(formattedTraders);
+
+            // Handle both response formats (data vs traders field)
+            if (response.status === 'ok' || response.status === 'success') {
+                // Get traders array from either 'data' or 'traders' field
+                const tradersArray = response.data || response.traders || [];
+
+                console.log('Traders response:', response);
+                console.log('Traders array:', tradersArray);
+
+                if (Array.isArray(tradersArray)) {
+                    const formattedTraders = tradersArray.map(trader => ({
+                        id: trader.id,
+                        wallet_address: trader.wallet_address,
+                        trader_name: trader.trader_name,
+                        description: trader.description,
+                        chain: trader.chain,
+                        copy_percentage: parseFloat(trader.copy_percentage || 0),
+                        max_position_usd: parseFloat(trader.max_position_usd || 0),
+                        status: trader.status,
+                        quality_score: parseInt(trader.quality_score || 0),
+                        total_pnl: parseFloat(trader.total_pnl_usd || 0),
+                        win_rate: parseFloat(trader.win_rate_pct || 0),
+                        total_trades: parseInt(trader.total_trades || 0),
+                        avg_trade_size: parseFloat(trader.avg_trade_size_usd || 0),
+                        last_activity_at: trader.last_activity_at,
+                        created_at: trader.created_at
+                    }));
+
+                    console.log('Formatted traders:', formattedTraders);
+                    setFollowedTraders(formattedTraders);
+                } else {
+                    console.error('Traders data is not an array:', tradersArray);
+                    setFollowedTraders([]);
+                }
+            } else {
+                console.error('Invalid response status:', response.status);
+                setError('Failed to load followed traders');
             }
         } catch (err) {
             setError('Failed to load followed traders');

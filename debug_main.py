@@ -304,7 +304,7 @@ def register_copy_trading_routes(app):
 
         try:
             # Use the REAL copy trading router instead of integrated
-            from dex_django.apps.api.copy_trading_real import router as real_router
+            from dex_django.apps.api.copy_trading_discovery import router as real_router
             app.include_router(real_router, tags=["copy-trading-real"])
             logger.info("✅ Copy trading REAL API routes registered successfully")
 
@@ -949,7 +949,7 @@ def get_app():
             logger.error("This means the frontend will get 404 errors on discovery requests")
         
         # Add API router for copy trading status
-        app.include_router(api_router, tags=["debug-api"])
+        # app.include_router(api_router, tags=["debug-api"])
         logger.info("API router added to debug app")
         
         # Add WebSocket router for real-time connections with debug logging
