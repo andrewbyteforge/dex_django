@@ -98,94 +98,68 @@ def install_missing_dependencies() -> None:
 def ensure_django_setup() -> bool:
     """Ensure Django is properly configured for database access."""
     try:
-        import os
-        import sys
         import django
         from django.conf import settings
         
-        # Get the current working directory (should be D:\dex_django)
-        current_dir = os.getcwd()
-        logger.info(f"Current working directory: {current_dir}")
-        
-        # CRITICAL FIX: Add the current directory to Python path
-        # This allows Python to find the dex_django.dex_django.settings module
-        if current_dir not in sys.path:
-            sys.path.insert(0, current_dir)
-            logger.info(f"Added {current_dir} to sys.path")
-        
-        # Verify the settings file exists at the expected location
-        settings_file = os.path.join(current_dir, 'dex_django', 'dex_django', 'settings.py')
-        logger.info(f"Settings file exists at {settings_file}: {os.path.exists(settings_file)}")
-        
-        # Set the Django settings module - this should now work
-        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.dex_django.settings')
-        logger.info(f"Django settings module set to: {os.environ.get('DJANGO_SETTINGS_MODULE')}")
-        
-        # Show current Python path for debugging
-        logger.info(f"Current Python path (first 3): {sys.path[:3]}")
-        
-        # Configure Django if not already configured
         if not settings.configured:
-            django.setup()
-            logger.info("Django setup() completed successfully")
-        else:
-            logger.info("Django already configured")
+            settings.configure(
+                DEBUG=True,
+                DATABASES={
+                    'default': {
+                        'ENGINE': 'django.db.backends.sqlite3',
+                        'NAME': os.path.join(current_dir, 'db.sqlite3'),
+                    }
+                },
+                INSTALLED_APPS=[
+                    'django.contrib.contenttypes',
+                    'django.contrib.auth',
+                    'dex_django.apps.core',
+                    'dex_django.apps.ledger',        # CRITICAL: Add this
+                    'dex_django.apps.intelligence',  # CRITICAL: Add this
+                ],
+                USE_TZ=True,
+                SECRET_KEY='debug-secret-key-not-for-production',
+                DEFAULT_AUTO_FIELD='django.db.models.BigAutoField',
+            )
             
-        # CRITICAL FIX: Check apps registry status without calling setup() again
-        # This fixes the "populate() isn't reentrant" error
-        from django.apps import apps
-        if not apps.ready:
-            # Only call setup if apps aren't ready AND settings aren't configured
-            if not settings.configured:
-                django.setup()
-                logger.info("Django apps loaded successfully")
-            else:
-                # Django is configured but apps aren't ready - this shouldn't happen
-                logger.warning("Django configured but apps not ready - this is unusual")
-        else:
-            logger.info("Django apps already loaded")
+        django.setup()
         
-        # Test that we can now import Django models without error
-        try:
-            from django.apps import apps
-            apps.check_apps_ready()
-            logger.info("Django apps registry is ready")
-        except Exception as app_error:
-            logger.error(f"Django apps registry not ready: {app_error}")
-            return False
-            
-        logger.info("Django configuration verified successfully")
+        # Create tables using raw SQL since Django migrations might not work in this setup
+        from django.db import connection
+        
+        with connection.cursor() as cursor:
+            # Create the ledger_followedtrader table that copy trading needs
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ledger_followedtrader (
+                    id VARCHAR(36) PRIMARY KEY,
+                    wallet_address VARCHAR(42) NOT NULL,
+                    trader_name VARCHAR(100) NOT NULL,
+                    description TEXT,
+                    chain VARCHAR(20) DEFAULT 'ethereum',
+                    copy_mode VARCHAR(20) DEFAULT 'percentage',
+                    copy_percentage DECIMAL(5,2) DEFAULT 3.0,
+                    fixed_amount_usd DECIMAL(10,2),
+                    max_position_usd DECIMAL(10,2) DEFAULT 1000.0,
+                    min_trade_value_usd DECIMAL(10,2) DEFAULT 50.0,
+                    max_slippage_bps INTEGER DEFAULT 300,
+                    copy_buy_only BOOLEAN DEFAULT FALSE,
+                    copy_sell_only BOOLEAN DEFAULT FALSE,
+                    status VARCHAR(20) DEFAULT 'active',
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(wallet_address)
+                )
+            """)
+        
+        logger.info("Django ORM initialized successfully with copy trading apps")
         return True
         
     except Exception as e:
         logger.error(f"Django setup failed: {e}")
-        import traceback
-        logger.error(f"Full traceback: {traceback.format_exc()}")
-        logger.error(f"Current Python path: {sys.path[:5]}")
-        logger.error(f"Current working directory: {os.getcwd()}")
-        logger.error(f"DJANGO_SETTINGS_MODULE: {os.environ.get('DJANGO_SETTINGS_MODULE', 'Not set')}")
-        
-        # Debug directory structure
-        try:
-            current_dir = os.getcwd()
-            logger.error(f"Root directory contents: {os.listdir(current_dir)}")
-            
-            dex_django_path = os.path.join(current_dir, 'dex_django')
-            if os.path.exists(dex_django_path):
-                logger.error(f"dex_django directory contents: {os.listdir(dex_django_path)}")
-                
-                inner_path = os.path.join(dex_django_path, 'dex_django')
-                if os.path.exists(inner_path):
-                    logger.error(f"Inner dex_django contents: {os.listdir(inner_path)}")
-                    
-                    # Check if settings.py actually exists
-                    settings_path = os.path.join(inner_path, 'settings.py')
-                    logger.error(f"settings.py exists: {os.path.exists(settings_path)}")
-                    
-        except Exception as debug_e:
-            logger.error(f"Error during debug info gathering: {debug_e}")
-            
         return False
+
+
 
 
 async def initialize_copy_trading_system():
@@ -276,20 +250,21 @@ def register_copy_trading_routes(app):
         logger.info("📡 Registering copy trading routes...")
 
         try:
-            from dex_django.apps.api.copy_trading_integrated import router as integrated_router
-            app.include_router(integrated_router, tags=["copy-trading-integrated"])
-            logger.info("✅ Copy trading API routes registered successfully")
+            # Use the REAL copy trading router instead of integrated
+            from dex_django.apps.api.copy_trading_real import router as real_router
+            app.include_router(real_router, tags=["copy-trading-real"])
+            logger.info("✅ Copy trading REAL API routes registered successfully")
 
             # List available endpoints
             copy_routes = [
                 "GET /api/v1/copy/status",
-                "POST /api/v1/copy/system/control", 
                 "GET /api/v1/copy/traders",
-                "POST /api/v1/copy/traders",
+                "POST /api/v1/copy/traders",  # This will now work!
                 "DELETE /api/v1/copy/traders/{trader_key}",
-                "GET /api/v1/copy/traders/{trader_key}",
                 "GET /api/v1/copy/trades",
-                "POST /api/v1/copy/paper/toggle",
+                "POST /api/v1/copy/discovery/discover-traders",
+                "GET /api/v1/copy/discovery/status",
+                "POST /api/v1/copy/discovery/analyze-wallet",
                 "GET /api/v1/copy/health",
             ]
 
@@ -305,6 +280,13 @@ def register_copy_trading_routes(app):
     except Exception as e:
         logger.error(f"❌ Failed to register copy trading routes: {e}")
         return {"success": False, "message": f"Route registration failed: {e}"}
+
+
+
+
+
+
+
 
 
 # ============================================================================
@@ -608,107 +590,63 @@ async def get_live_opportunities():
 @api_router.post("/copy/discovery/discover-traders")
 async def discover_traders_endpoint(request_data: dict = None):
     """Auto-discover REAL traders with optimized API usage."""
+    
+    logger.info(f"🔍 DISCOVERY ENDPOINT HIT: /copy/discovery/discover-traders")
+    logger.info(f"📥 Request data: {request_data}")
+    
     try:
-        body = request_data or {}
-        chains = body.get('chains', ['ethereum', 'bsc', 'base'])
-        limit = min(body.get('limit', 10), 20)  # Reduced max limit
+        # Parse the request data
+        if request_data is None:
+            logger.warning("⚠️ No request data provided, using defaults")
+            request_data = {
+                "chains": ["ethereum", "bsc"],
+                "limit": 20,
+                "min_volume_usd": 50000,
+                "days_back": 30,
+                "auto_add_threshold": 80.0
+            }
         
-        logger.info(f"🔍 Discovering REAL traders: chains={chains}, limit={limit}")
+        logger.info(f"🎯 Processing request: {request_data}")
         
-        discovered_traders = []
+        # Import and call the real discovery function
+        from dex_django.apps.api.copy_trading_real import discover_traders_real, DiscoveryRequest
         
-        # Create session with connection limits
-        connector = aiohttp.TCPConnector(limit=5, limit_per_host=2)
-        timeout = aiohttp.ClientTimeout(total=30)
+        # Create the discovery request
+        request = DiscoveryRequest(**request_data)
+        logger.info(f"✅ DiscoveryRequest created: chains={request.chains}, limit={request.limit}")
         
-        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-            for chain in chains[:2]:  # Limit to 2 chains to avoid rate limits
-                try:
-                    # Get trending tokens from DexScreener
-                    url = f"https://api.dexscreener.com/latest/dex/pairs/{chain}"
-                    
-                    async with session.get(url) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            pairs = data.get("pairs", [])
-                            
-                            # Process only top 2 pairs per chain to avoid rate limits
-                            for pair in pairs[:2]:
-                                if not pair.get("volume", {}).get("h24"):
-                                    continue
-                                    
-                                volume_24h = float(pair.get("volume", {}).get("h24", 0))
-                                if volume_24h < 100000:  # Higher threshold
-                                    continue
-                                
-                                # Try to get real trader address
-                                trader_address = await get_top_trader_for_token(
-                                    session, 
-                                    pair.get("baseToken", {}).get("address", ""),
-                                    chain
-                                )
-                                
-                                if trader_address:
-                                    trader = {
-                                        "wallet_address": trader_address,
-                                        "address": trader_address,
-                                        "trader_name": f"Trader_{trader_address[:8]}",
-                                        "chain": chain,
-                                        "confidence_score": calculate_confidence_from_pair_data(pair),
-                                        "quality_score": calculate_confidence_from_pair_data(pair),
-                                        "total_volume_usd": volume_24h * random.uniform(0.05, 0.15),
-                                        "total_trades": estimate_trade_count(volume_24h),
-                                        "win_rate": estimate_win_rate_from_volume(pair),
-                                        "avg_trade_size": volume_24h / max(estimate_trade_count(volume_24h), 1),
-                                        "risk_level": assess_risk_level(pair),
-                                        "last_active": datetime.now(timezone.utc).isoformat(),
-                                        "allocation_percentage": round(random.uniform(1.5, 4.0), 1),
-                                        "recommended": calculate_confidence_from_pair_data(pair) > 70
-                                    }
-                                    discovered_traders.append(trader)
-                                
-                                # Add small delay between API calls to respect rate limits
-                                await asyncio.sleep(0.2)
-                                
-                                if len(discovered_traders) >= limit:
-                                    break
-                                    
-                except Exception as chain_error:
-                    logger.error(f"Error processing {chain}: {chain_error}")
-                    continue
-                
-                if len(discovered_traders) >= limit:
-                    break
+        # Call the actual discovery function
+        logger.info("🚀 Calling discover_traders_real...")
+        discovered_wallets = await discover_traders_real(request)
         
-        # Sort by confidence score
-        discovered_traders.sort(key=lambda x: x["confidence_score"], reverse=True)
+        logger.info(f"📈 discover_traders_real returned: {len(discovered_wallets)} wallets")
         
-        logger.info(f"Successfully discovered {len(discovered_traders)} real traders")
+        # Log each wallet for debugging
+        for i, wallet in enumerate(discovered_wallets):
+            logger.info(f"💰 Wallet {i+1}: {wallet.get('address', 'N/A')[:10]}... score: {wallet.get('quality_score', 'N/A')}")
         
-        return {
+        # Prepare response
+        response = {
             "status": "ok",
             "success": True,
-            "discovered_wallets": discovered_traders[:limit],
-            "candidates": discovered_traders[:limit],
-            "data": discovered_traders[:limit],
-            "count": len(discovered_traders[:limit]),
+            "discovered_wallets": discovered_wallets,
+            "candidates": discovered_wallets,  # For frontend compatibility
+            "data": discovered_wallets,        # For frontend compatibility
+            "count": len(discovered_wallets),
             "data_source": "real_blockchain_apis",
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
+        logger.info(f"📤 Final response: status={response['status']}, count={response['count']}")
+        return response
+        
+    except ImportError as e:
+        logger.error(f"❌ Failed to import discovery functions: {e}")
+        raise HTTPException(500, "Discovery system not available")
+        
     except Exception as e:
-        logger.error(f"Real trader discovery error: {e}")
-        return {
-            "status": "error",
-            "success": False,
-            "error": str(e),
-            "discovered_wallets": [],
-            "count": 0,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-
-
-
+        logger.error(f"❌ Discovery failed: {str(e)}", exc_info=True)
+        raise HTTPException(500, f"Discovery failed: {str(e)}")
 
 async def get_top_trader_for_token(session, token_address: str, chain: str) -> str:
     """Get REAL top trader address using optimized blockchain API calls."""
