@@ -66,22 +66,22 @@ def setup_django() -> bool:
             logger.warning(f"settings.py not found at expected location: {expected_settings}")
         
         # Configure Django settings BEFORE importing django
-        # Use the correct module path: 'dex_django.settings' not 'dex_django.dex_django.settings'
+        # Use the correct module path: 'dex_django.dex_django.settings' not 'dex_django.dex_django.settings'
         if not os.environ.get('DJANGO_SETTINGS_MODULE'):
-            os.environ['DJANGO_SETTINGS_MODULE'] = 'dex_django.settings'
+            os.environ['DJANGO_SETTINGS_MODULE'] = 'dex_django.dex_django.settings'
             logger.info(f"Set DJANGO_SETTINGS_MODULE to: dex_django.settings")
         else:
             current_setting = os.environ.get('DJANGO_SETTINGS_MODULE')
-            if current_setting != 'dex_django.settings':
-                logger.warning(f"Overriding DJANGO_SETTINGS_MODULE from '{current_setting}' to 'dex_django.settings'")
-                os.environ['DJANGO_SETTINGS_MODULE'] = 'dex_django.settings'
+            if current_setting != 'dex_django.dex_django.settings':
+                logger.warning(f"Overriding DJANGO_SETTINGS_MODULE from '{current_setting}' to 'dex_django.dex_django.settings'")
+                os.environ['DJANGO_SETTINGS_MODULE'] = 'dex_django.dex_django.settings'
             else:
                 logger.info(f"DJANGO_SETTINGS_MODULE already correctly set to: {current_setting}")
         
         # Test if we can import the settings module before trying Django setup
         try:
             import importlib
-            settings_module = importlib.import_module('dex_django.settings')
+            settings_module = importlib.import_module('dex_django.dex_django.settings')
             logger.debug(f"Successfully imported settings module from: {settings_module.__file__}")
         except ImportError as e:
             logger.error(f"Cannot import dex_django.settings: {e}")

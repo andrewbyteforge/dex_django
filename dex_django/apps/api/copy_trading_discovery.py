@@ -21,7 +21,7 @@ import django
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "dex_django.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "dex_django.dex_django.settings")
 django.setup()
 
 from django.db import connection, transaction

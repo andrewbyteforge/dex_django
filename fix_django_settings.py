@@ -32,23 +32,23 @@ def fix_django_settings():
     # Files to check and fix
     files_to_fix = {
         "manage.py": {
-            "old": "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.settings')",
+            "old": "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.dex_django.settings')",
             "new": "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.dex_django.settings')"
         },
         "dex_django/wsgi.py": {
-            "old": "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.settings')",
+            "old": "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.dex_django.settings')",
             "new": "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.dex_django.settings')"
         },
         "dex_django/asgi.py": {
-            "old": "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.settings')",
+            "old": "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.dex_django.settings')",
             "new": "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.dex_django.settings')"
         },
         "dex_django/dex_django/wsgi.py": {
-            "old": "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.settings')",
+            "old": "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.dex_django.settings')",
             "new": "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.dex_django.settings')"
         },
         "dex_django/dex_django/asgi.py": {
-            "old": "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.settings')",
+            "old": "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.dex_django.settings')",
             "new": "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.dex_django.settings')"
         }
     }
