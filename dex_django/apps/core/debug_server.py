@@ -25,7 +25,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     
     Handles application startup and shutdown tasks including:
     - Django ORM initialization
-    - Module availability detection
     - Background task scheduling
     - Resource cleanup
     """
@@ -41,9 +40,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Django ORM initialized successfully")
         else:
             logger.warning("Django ORM initialization failed - some features may be unavailable")
-        
-        # Try to import and register optional modules
-        await _detect_and_register_modules()
         
         # Start background tasks
         background_tasks = await _start_background_tasks()
@@ -75,44 +71,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         debug_state.shutdown()
         
         logger.info("Debug server shutdown completed")
-
-
-async def _detect_and_register_modules() -> None:
-    """
-    Detect and register optional modules.
-    
-    Attempts to import copy_mock and complete copy trading modules,
-    updating debug state with their availability.
-    """
-    copy_mock_available = False
-    copy_trading_ready = False
-    
-    # Try to import copy_mock module
-    try:
-        from apps.api import copy_mock
-        copy_mock_available = True
-        logger.info("copy_mock module detected and available")
-    except ImportError as e:
-        logger.info(f"copy_mock module not available: {e}")
-    except Exception as e:
-        logger.warning(f"Error importing copy_mock module: {e}")
-    
-    # Try to import complete copy trading system
-    try:
-        from dex_django.apps.strategy import copy_trading_complete
-        copy_trading_ready = True
-        logger.info("Complete copy trading system detected and available")
-    except ImportError as e:
-        logger.info(f"Complete copy trading system not available: {e}")
-    except Exception as e:
-        logger.warning(f"Error importing copy trading system: {e}")
-    
-    # Update debug state with module availability
-    debug_state.set_module_availability(
-        copy_mock=copy_mock_available,
-        copy_trading_system=copy_trading_ready,
-        django=debug_state.django_initialized
-    )
 
 
 async def _start_background_tasks() -> list:
@@ -171,8 +129,7 @@ def create_debug_app() -> FastAPI:
     
     Sets up the complete FastAPI application with:
     - CORS middleware for frontend communication
-    - All API and WebSocket routers
-    - Optional module routers (copy_mock, copy_trading)
+    - Core API and WebSocket routers
     - Proper error handling and logging
     
     Returns:
@@ -204,61 +161,13 @@ def create_debug_app() -> FastAPI:
         allow_headers=["*"],
     )
     
-    # Register core routers
+    # Register core routers only
     app.include_router(health_router, tags=["health"])
     app.include_router(api_router, tags=["debug-api"])
     app.include_router(ws_router, tags=["websockets"])
     
-    # Register optional routers after app creation
-    _register_optional_routers(app)
-    
     logger.info("FastAPI debug application created and configured")
     return app
-
-
-def _register_optional_routers(app: FastAPI) -> None:
-    """
-    Register optional routers if their modules are available.
-    
-    Args:
-        app: FastAPI application instance to register routers with.
-    """
-    routers_registered = 0
-    
-    # Register copy_mock router if available
-    if debug_state.copy_mock_available:
-        try:
-            from apps.api import copy_mock
-            app.include_router(copy_mock.router, tags=["copy-mock"])
-            
-            # Register discovery router if it exists
-            if hasattr(copy_mock, 'discovery_router'):
-                app.include_router(copy_mock.discovery_router, tags=["copy-mock-discovery"])
-                routers_registered += 1
-            
-            routers_registered += 1
-            logger.info("copy_mock routers registered successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to register copy_mock routers: {e}")
-            debug_state.set_module_availability(copy_mock=False)
-    
-    # Register complete copy trading router if available
-    if debug_state.copy_trading_system_ready:
-        try:
-            from dex_django.apps.strategy.copy_trading_complete import router as complete_copy_router
-            app.include_router(complete_copy_router, tags=["copy-trading-complete"])
-            routers_registered += 1
-            logger.info("Complete copy trading router registered successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to register complete copy trading router: {e}")
-            debug_state.set_module_availability(copy_trading_system=False)
-    
-    if routers_registered > 0:
-        logger.info(f"Registered {routers_registered} optional routers")
-    else:
-        logger.info("No optional routers registered")
 
 
 def get_app_info() -> dict:
@@ -284,9 +193,7 @@ def get_app_info() -> dict:
         "routers": {
             "health": True,
             "debug_api": True,
-            "websockets": True,
-            "copy_mock": debug_state.copy_mock_available,
-            "copy_trading_complete": debug_state.copy_trading_system_ready
+            "websockets": True
         },
         "endpoints": {
             "docs": "/docs",
