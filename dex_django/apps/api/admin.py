@@ -5,119 +5,42 @@ from __future__ import annotations
 import logging
 from typing import Dict, Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-# from backend.data_seeder import copy_trading_seeder
-from apps.core.data_seeder import copy_trading_seeder  # Fixed path
+from apps.copy_trading.copy_trading_coordinator import copy_trading_coordinator
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 logger = logging.getLogger("api.admin")
 
 
-class SeedingResponse(BaseModel):
-    """Response model for seeding operations."""
+class SystemStatusResponse(BaseModel):
+    """Response model for system status."""
     status: str
     message: str
-    seeded_count: int
-    errors: list = []
+    details: dict = {}
 
 
-@router.post("/seed/copy-trading", summary="Add real trader wallets")
-async def seed_copy_trading(
-    force_reseed: bool = Query(False, description="Force reseed even if data exists")
-) -> Dict[str, Any]:
-    """
-    Seed the copy trading system with trader wallets.
-    
-    IMPORTANT: No mock data available. You must provide real wallet addresses.
-    """
+@router.get("/status", summary="Get system status")
+async def get_system_status() -> Dict[str, Any]:
+    """Get current system status and statistics."""
     
     try:
-        logger.info(f"Checking for real trader configurations...")
-        
-        result = await copy_trading_seeder.seed_copy_trading_data(
-            force_reseed=force_reseed
-        )
-        
-        if result["status"] == "error":
-            raise HTTPException(500, result["error"])
-        
-        if result.get("seeded_count", 0) == 0:
-            return {
-                "status": "warning",
-                "message": "No traders to seed - please add real wallet addresses",
-                "instructions": [
-                    "1. Research profitable traders using blockchain analytics",
-                    "2. Verify wallet addresses on-chain",
-                    "3. Add traders through the Copy Trading UI",
-                    "4. Or create a real_traders.json configuration file"
-                ]
-            }
+        # Get copy trading coordinator status
+        coordinator_status = await copy_trading_coordinator.get_status()
         
         return {
             "status": "success",
-            "message": f"Successfully added {result['seeded_count']} real traders",
-            "details": result
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to seed copy trading data: {e}")
-        raise HTTPException(500, f"Seeding failed: {str(e)}") from e
-
-
-
-
-
-
-@router.get("/seed/status", summary="Get seeding status")
-async def get_seeding_status() -> Dict[str, Any]:
-    """Get current database seeding status and statistics."""
-    
-    try:
-        status = await copy_trading_seeder.get_seeding_status()
-        
-        return {
-            "status": "success",
-            "seeding_status": status,
-            "recommendations": [
-                "Run /admin/seed/copy-trading if no traders exist",
-                "Replace example wallet addresses with real ones",
-                "Verify trader configurations in Copy Trading tab"
-            ]
+            "system_status": {
+                "copy_trading": coordinator_status,
+                "database": "connected"
+            },
+            "message": "System operational"
         }
         
     except Exception as e:
-        logger.error(f"Failed to get seeding status: {e}")
+        logger.error(f"Failed to get system status: {e}")
         raise HTTPException(500, f"Status check failed: {str(e)}") from e
-
-
-@router.post("/seed/sample-transactions", summary="Create sample transactions for testing")
-async def create_sample_transactions() -> Dict[str, Any]:
-    """
-    Create sample detected transactions for testing the copy trading pipeline.
-    This helps test the system without waiting for real transactions.
-    """
-    
-    try:
-        result = await copy_trading_seeder.create_sample_transactions()
-        
-        if result["status"] == "error":
-            raise HTTPException(500, result["error"])
-        
-        return {
-            "status": "success",
-            "message": f"Created {result['created_transactions']} sample transactions",
-            "details": result
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to create sample transactions: {e}")
-        raise HTTPException(500, f"Sample creation failed: {str(e)}") from e
 
 
 @router.post("/copy-trading/start", summary="Start copy trading system")
@@ -160,115 +83,44 @@ async def stop_copy_trading() -> Dict[str, Any]:
         raise HTTPException(500, f"Stop failed: {str(e)}") from e
 
 
-@router.get("/copy-trading/system-status", summary="Get copy trading system status")
-async def get_copy_trading_system_status() -> Dict[str, Any]:
-    """Get detailed copy trading system status."""
+@router.post("/copy-trading/restart", summary="Restart copy trading system")
+async def restart_copy_trading() -> Dict[str, Any]:
+    """Restart the copy trading coordinator."""
     
     try:
-        status = await copy_trading_coordinator.get_system_status()
+        # Stop first
+        await copy_trading_coordinator.stop()
+        
+        # Small delay
+        import asyncio
+        await asyncio.sleep(1)
+        
+        # Start again
+        result = await copy_trading_coordinator.start()
         
         return {
             "status": "success",
-            "system_status": status,
-            "health_check": {
-                "database_connected": True,  # Would check actual DB connection
-                "wallet_tracker_active": status.get("system", {}).get("wallet_tracker_active", False),
-                "coordinator_running": status.get("system", {}).get("running", False)
-            }
+            "message": "Copy trading system restarted",
+            "details": result
         }
         
     except Exception as e:
-        logger.error(f"Failed to get system status: {e}")
-        raise HTTPException(500, f"Status check failed: {str(e)}") from e
+        logger.error(f"Failed to restart copy trading system: {e}")
+        raise HTTPException(500, f"Restart failed: {str(e)}") from e
 
 
-@router.delete("/data/reset-copy-trading", summary="Reset all copy trading data")
-async def reset_copy_trading_data() -> Dict[str, Any]:
-    """
-    **DANGER**: Reset all copy trading data. This will delete:
-    - All tracked wallets
-    - All detected transactions  
-    - All copy trade records
-    - All performance metrics
-    
-    Use with extreme caution!
-    """
+@router.get("/copy-trading/stats", summary="Get copy trading statistics")
+async def get_copy_trading_stats() -> Dict[str, Any]:
+    """Get detailed copy trading statistics."""
     
     try:
-        # Stop system first
-        await copy_trading_coordinator.stop()
-        
-        # TODO: Implement actual database reset
-        # This would involve:
-        # 1. DELETE FROM copy_trades;
-        # 2. DELETE FROM detected_transactions;
-        # 3. DELETE FROM tracked_wallets;
-        # 4. DELETE FROM copy_trading_metrics;
-        
-        logger.warning("Copy trading data reset requested - would delete all data!")
+        stats = await copy_trading_coordinator.get_statistics()
         
         return {
-            "status": "warning",
-            "message": "Data reset not implemented - this would delete ALL copy trading data",
-            "what_would_be_deleted": [
-                "All tracked wallets and their configurations",
-                "All detected transaction history",
-                "All copy trade execution records", 
-                "All performance metrics and analytics"
-            ],
-            "recommendation": "Implement this carefully with proper backups"
+            "status": "success",
+            "statistics": stats
         }
         
     except Exception as e:
-        logger.error(f"Failed to reset copy trading data: {e}")
-        raise HTTPException(500, f"Reset failed: {str(e)}") from e
-
-
-@router.get("/wallet-research/tips", summary="Get tips for finding real trader wallets")
-async def get_wallet_research_tips() -> Dict[str, Any]:
-    """
-    Get guidance on how to find real successful trader wallet addresses
-    to replace the example ones in the seeded data.
-    """
-    
-    return {
-        "status": "success",
-        "research_methods": {
-            "blockchain_analytics": [
-                "Use Nansen.ai to find profitable wallet addresses",
-                "Arkham Intelligence for wallet clustering and analysis",
-                "DexScreener to find top traders on specific tokens",
-                "Etherscan/BSCScan to analyze transaction patterns"
-            ],
-            "public_disclosures": [
-                "Twitter threads where traders share their addresses",
-                "Discord communities with wallet verification",
-                "Telegram groups with performance sharing", 
-                "YouTube/blog content with wallet reveals"
-            ],
-            "on_chain_analysis": [
-                "Look for consistent profitability over time",
-                "Analyze risk management (position sizing, diversification)",
-                "Check for suspicious activity (MEV, wash trading)",
-                "Verify real trading vs bot activity"
-            ]
-        },
-        "red_flags": [
-            "Wallets with only profitable trades (unrealistic)",
-            "Very new wallets without trading history",
-            "Wallets engaged in obvious MEV or arbitrage",
-            "Addresses involved in suspicious DeFi protocols"
-        ],
-        "verification_steps": [
-            "Backtest wallet performance over 3+ months",
-            "Check wallet activity across multiple market conditions",
-            "Verify the wallet isn't a smart contract or bot",
-            "Ensure reasonable transaction frequency and sizes"
-        ],
-        "integration_process": [
-            "Replace example addresses in the seeder",
-            "Configure appropriate copy percentages (1-5%)",
-            "Set realistic position limits based on wallet size",
-            "Start with small copy amounts and monitor performance"
-        ]
-    }
+        logger.error(f"Failed to get copy trading statistics: {e}")
+        raise HTTPException(500, f"Statistics retrieval failed: {str(e)}") from e
