@@ -152,19 +152,19 @@ async def check_database_tables() -> Dict[str, bool]:
 # Data Helper Functions
 # ============================================================================
 
-def get_mock_trader_performance() -> Dict[str, Any]:
-    """Generate realistic mock performance data."""
-    return {
-        "total_trades": random.randint(50, 500),
-        "win_rate": round(random.uniform(45, 75), 1),
-        "avg_profit": round(random.uniform(5, 25), 2),
-        "total_pnl_usd": round(random.uniform(1000, 50000), 2),
-        "sharpe_ratio": round(random.uniform(0.5, 2.5), 2),
-        "max_drawdown": round(random.uniform(-10, -30), 2),
-        "trades_24h": random.randint(0, 20),
-        "volume_24h_usd": round(random.uniform(1000, 100000), 2),
-        "last_trade_at": (datetime.now(timezone.utc) - timedelta(minutes=random.randint(5, 120))).isoformat()
-    }
+# def get_mock_trader_performance() -> Dict[str, Any]:
+#     """Generate realistic mock performance data."""
+#     return {
+#         "total_trades": random.randint(50, 500),
+#         "win_rate": round(random.uniform(45, 75), 1),
+#         "avg_profit": round(random.uniform(5, 25), 2),
+#         "total_pnl_usd": round(random.uniform(1000, 50000), 2),
+#         "sharpe_ratio": round(random.uniform(0.5, 2.5), 2),
+#         "max_drawdown": round(random.uniform(-10, -30), 2),
+#         "trades_24h": random.randint(0, 20),
+#         "volume_24h_usd": round(random.uniform(1000, 100000), 2),
+#         "last_trade_at": (datetime.now(timezone.utc) - timedelta(minutes=random.randint(5, 120))).isoformat()
+#     }
 
 
 @sync_to_async
@@ -660,6 +660,26 @@ async def get_copy_trades(
             "error": str(e),
             "database_available": DJANGO_AVAILABLE
         }
+
+
+async def discover_traders_real(request: DiscoveryRequest) -> List[Dict[str, Any]]:
+    """
+    Real implementation of trader discovery.
+    NO MOCK DATA - Returns empty list or real discovered traders only.
+    """
+    logger.info(f"Starting real trader discovery: chains={request.chains}, limit={request.limit}")
+    
+    discovered_wallets = []
+    
+    # REMOVED: Mock traders array
+    # Only return real discovered wallets from blockchain analysis
+    
+    logger.warning("No mock traders available - use real wallet addresses only")
+    logger.info("Add real traders through the UI or configure in real_traders.json")
+    
+    return discovered_wallets
+
+
 
 
 @router.post("/discovery/start")

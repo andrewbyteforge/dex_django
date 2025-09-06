@@ -19,7 +19,7 @@ import enum
 Base = declarative_base()
 
 
-class ChainType(enum.Enum):
+class enum.Enum:
     """Supported blockchain types."""
     ETHEREUM = "ethereum"
     BSC = "bsc"
@@ -335,4 +335,4 @@ def create_wallet_key(address: str, chain: ChainType) -> str:
 def parse_wallet_key(wallet_key: str) -> tuple[str, ChainType]:
     """Parse wallet key into address and chain."""
     chain_str, address = wallet_key.split(":", 1)
-    return address, ChainType(chain_str)
+    return address, chain_str

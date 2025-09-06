@@ -23,23 +23,18 @@ class SeedingResponse(BaseModel):
     errors: list = []
 
 
-@router.post("/seed/copy-trading", summary="Seed copy trading with sample traders")
+@router.post("/seed/copy-trading", summary="Add real trader wallets")
 async def seed_copy_trading(
     force_reseed: bool = Query(False, description="Force reseed even if data exists")
 ) -> Dict[str, Any]:
     """
-    Seed the copy trading system with high-quality sample traders.
-    This populates the database with example wallet addresses and configurations.
+    Seed the copy trading system with trader wallets.
     
-    **Important**: The wallet addresses are examples. In production, you would:
-    1. Research actual successful trader wallet addresses
-    2. Use blockchain analytics platforms (Nansen, Arkham, DexScreener)
-    3. Find publicly disclosed wallets from successful traders
-    4. Analyze on-chain transaction history for profitability
+    IMPORTANT: No mock data available. You must provide real wallet addresses.
     """
     
     try:
-        logger.info(f"Seeding copy trading data (force_reseed={force_reseed})")
+        logger.info(f"Checking for real trader configurations...")
         
         result = await copy_trading_seeder.seed_copy_trading_data(
             force_reseed=force_reseed
@@ -48,16 +43,22 @@ async def seed_copy_trading(
         if result["status"] == "error":
             raise HTTPException(500, result["error"])
         
+        if result.get("seeded_count", 0) == 0:
+            return {
+                "status": "warning",
+                "message": "No traders to seed - please add real wallet addresses",
+                "instructions": [
+                    "1. Research profitable traders using blockchain analytics",
+                    "2. Verify wallet addresses on-chain",
+                    "3. Add traders through the Copy Trading UI",
+                    "4. Or create a real_traders.json configuration file"
+                ]
+            }
+        
         return {
             "status": "success",
-            "message": f"Successfully seeded {result['seeded_count']} traders",
-            "details": result,
-            "next_steps": [
-                "Review seeded traders in the Copy Trading tab",
-                "Replace example addresses with real successful trader wallets",
-                "Start copy trading system to begin monitoring",
-                "Monitor performance and adjust copy settings as needed"
-            ]
+            "message": f"Successfully added {result['seeded_count']} real traders",
+            "details": result
         }
         
     except HTTPException:
@@ -65,6 +66,10 @@ async def seed_copy_trading(
     except Exception as e:
         logger.error(f"Failed to seed copy trading data: {e}")
         raise HTTPException(500, f"Seeding failed: {str(e)}") from e
+
+
+
+
 
 
 @router.get("/seed/status", summary="Get seeding status")

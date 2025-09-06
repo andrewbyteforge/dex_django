@@ -320,7 +320,7 @@ async def add_followed_trader(req: AddFollowedTraderRequest) -> Dict[str, Any]:
     """Add a new trader to follow using WalletTracker."""
     try:
         # Check if trader is already being tracked
-        chain_enum = ChainType(req.chain)
+        chain_enum = req.chain
         wallet_key = f"{req.chain}:{req.wallet_address}"
         
         if wallet_key in wallet_tracker.tracked_wallets:

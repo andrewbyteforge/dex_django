@@ -121,7 +121,7 @@ async def discover_traders(req: DiscoveryRequest) -> Dict[str, Any]:
         
         # Discover on each requested chain
         for chain_str in req.chains:
-            chain = ChainType(chain_str)
+            chain = chain_str
             
             candidates = await wallet_discovery_engine.discover_top_traders(
                 chain=chain,
@@ -225,7 +225,7 @@ async def analyze_wallet(req: WalletAnalysisRequest) -> Dict[str, Any]:
     try:
         logger.info(f"Analyzing wallet {req.address} on {req.chain}")
         
-        chain = ChainType(req.chain)
+        chain = req.chain
         
         candidate = await wallet_discovery_engine.analyze_wallet_performance(
             address=req.address,
@@ -301,7 +301,7 @@ async def configure_continuous_discovery(req: ContinuousDiscoveryRequest) -> Dic
     
     try:
         if req.enabled:
-            chains = [ChainType(chain) for chain in req.chains]
+            chains = [chain for chain in req.chains]
             
             await wallet_discovery_engine.start_continuous_discovery(
                 chains=chains,

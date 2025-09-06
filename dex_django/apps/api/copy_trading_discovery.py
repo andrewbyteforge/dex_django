@@ -174,7 +174,7 @@ class CopyTradingDiscoveryEngine:
                 
                 wallet = WalletCandidate(
                     wallet_address=self._generate_wallet_address(),
-                    chain=ChainType(chain.lower()),
+                    chain=chain.lower(),
                     quality_score=quality_score,
                     confidence_score=random.uniform(65, 95),
                     win_rate=win_rate,
@@ -421,6 +421,15 @@ async def get_followed_traders(
             "count": 0,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
+
+
+
+
+
+
+
+
+
 
 
 @router.post("/traders")

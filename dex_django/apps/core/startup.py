@@ -6,17 +6,17 @@ import asyncio
 import logging
 from typing import Dict, Any
 
-from dex_django.core.database import init_db
-from dex_django.core.data_seeder import copy_trading_seeder
-from dex_django.copy_trading.copy_trading_coordinator import copy_trading_coordinator
+from dex_django.apps.core.database import init_db
+from dex_django.apps.core.data_seeder import copy_trading_seeder
+from dex_django.apps.copy_trading.copy_trading_coordinator import copy_trading_coordinator
 
 logger = logging.getLogger("core.startup")
 
 
 async def initialize_application() -> Dict[str, Any]:
     """
-    Initialize the DEX Sniper Pro application with copy trading capabilities.
-    This runs on application startup to ensure all systems are ready.
+    Initialize the DEX Sniper Pro application.
+    NO AUTO-SEEDING WITH MOCK DATA.
     """
     
     logger.info("Initializing DEX Sniper Pro application...")
@@ -35,48 +35,26 @@ async def initialize_application() -> Dict[str, Any]:
         logger.info("Database initialized successfully")
         
         # 2. Check seeding status
-        logger.info("Checking copy trading seeding status...")
+        logger.info("Checking copy trading data status...")
         seeding_status = await copy_trading_seeder.get_seeding_status()
         results["seeding_check"] = seeding_status
         
-        # 3. Auto-seed if no data exists
+        # 3. REMOVED: Auto-seeding with mock data
+        # Now just log status
         if seeding_status.get("seeding_needed", False):
-            logger.info("No copy trading data found, auto-seeding with sample traders...")
-            seed_result = await copy_trading_seeder.seed_copy_trading_data(force_reseed=False)
-            results["auto_seeding"] = seed_result
-            
-            if seed_result["status"] == "success":
-                logger.info(f"Auto-seeded {seed_result['seeded_count']} sample traders")
-            else:
-                logger.warning(f"Auto-seeding failed: {seed_result.get('error', 'Unknown error')}")
+            logger.info("No copy trading data found")
+            logger.info("Please add real trader wallets through the UI")
+            logger.info("Research profitable traders using:")
+            logger.info("  - Nansen.ai")
+            logger.info("  - Arkham Intelligence")
+            logger.info("  - DexScreener")
+            logger.info("  - On-chain analysis")
         
-        # 4. Prepare copy trading system (don't start automatically)
-        logger.info("Copy trading system ready for manual start")
-        results["copy_trading_ready"] = True
-        
-        logger.info("DEX Sniper Pro initialization completed successfully")
-        
-        return {
-            "status": "success",
-            "message": "Application initialized successfully",
-            "details": results,
-            "next_steps": [
-                "Visit the Copy Trading tab to review seeded traders",
-                "Replace example wallet addresses with real successful traders",
-                "Start copy trading monitoring when ready",
-                "Configure copy settings based on your risk tolerance"
-            ]
-        }
-        
-    except Exception as e:
-        logger.error(f"Application initialization failed: {e}")
-        results["error"] = str(e)
-        
-        return {
-            "status": "error",
-            "message": f"Initialization failed: {str(e)}",
-            "details": results
-        }
+        # Continue with rest of initialization...
+
+
+
+
 
 
 async def startup_copy_trading_system() -> Dict[str, Any]:
