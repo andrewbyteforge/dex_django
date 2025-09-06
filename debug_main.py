@@ -29,15 +29,6 @@ import uvicorn
 import uuid
 from fastapi import APIRouter, HTTPException
 
-
-logging.getLogger("api.copy_trading_discovery").setLevel(logging.INFO)
-logging.getLogger("discovery").setLevel(logging.INFO)
-
-# System path setup - Add to path BEFORE importing app modules
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -45,6 +36,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger("debug_main")
 
+logging.getLogger("api.copy_trading_discovery").setLevel(logging.INFO)
+logging.getLogger("discovery").setLevel(logging.INFO)
+
+
+# System path setup - Add to path BEFORE importing app modules
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)  # This gets D:\dex_django
+
+# Add both paths to ensure all imports work
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+    
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+    logger.info(f"Added {project_root} to Python path")
 
 
 

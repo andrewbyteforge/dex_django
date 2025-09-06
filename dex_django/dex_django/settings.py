@@ -172,9 +172,6 @@ LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "filters": {
-        "redact_secrets": {"()": "dex_django.logging_filters.RedactSecretsFilter"}
-    },
     "formatters": {
         "json": {
             "format": (
@@ -187,7 +184,6 @@ LOGGING = {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "json",
-            "filters": ["redact_secrets"],
         },
         "apifile": {
             "class": "logging.handlers.TimedRotatingFileHandler",
@@ -197,7 +193,6 @@ LOGGING = {
             "backupCount": 14,
             "encoding": "utf-8",
             "formatter": "json",
-            "filters": ["redact_secrets"],
         },
     },
     "loggers": {
