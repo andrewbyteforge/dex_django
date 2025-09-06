@@ -62,20 +62,21 @@ const copyTradingApi = {
     }
 };
 
+// In CopyTradingTab.jsx, update the discoveryApi object:
 const discoveryApi = {
     async getStatus() {
-        return await apiCall('/api/v1/copy/discovery/status');
+        return await apiCall('/api/v1/discovery/discovery-status');  // Remove 'copy/'
     },
 
     async discoverTraders(config) {
-        return await apiCall('/api/v1/copy/discovery/discover-traders', {
+        return await apiCall('/api/v1/discovery/discover-traders', {  // Remove 'copy/'
             method: 'POST',
             body: JSON.stringify(config)
         });
     },
 
     async analyzeWallet(walletData) {
-        return await apiCall('/api/v1/copy/discovery/analyze-wallet', {
+        return await apiCall('/api/v1/discovery/analyze-wallet', {  // Remove 'copy/'
             method: 'POST',
             body: JSON.stringify(walletData)
         });

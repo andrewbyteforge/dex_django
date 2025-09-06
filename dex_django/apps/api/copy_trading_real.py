@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Dict, Any, List, Optional
 
+from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Query
 from asgiref.sync import sync_to_async
 
@@ -21,6 +22,19 @@ except ImportError:
 
 router = APIRouter(prefix="/api/v1/copy-trading-real", tags=["copy-trading-real"])
 logger = logging.getLogger("api.copy_trading_real")
+
+
+# ============================================================================
+# Request Models
+# ============================================================================
+
+class DiscoveryRequest(BaseModel):
+    """Request model for trader discovery."""
+    chains: List[str]
+    limit: int = 20
+    min_volume_usd: float = 50000
+    days_back: int = 30
+    auto_add_threshold: float = 80.0
 
 
 # ============================================================================
@@ -231,6 +245,101 @@ async def get_detected_transactions(hours: int = 24, limit: int = 100) -> List[D
 
 
 # ============================================================================
+# Discovery Function
+# ============================================================================
+
+async def discover_traders_real(request: DiscoveryRequest) -> List[Dict[str, Any]]:
+    """
+    Real implementation of trader discovery.
+    Discovers profitable traders using wallet discovery engine.
+    """
+    logger.info(f"Starting real trader discovery: chains={request.chains}, limit={request.limit}")
+    
+    try:
+        from dex_django.apps.discovery.wallet_discovery_engine import (
+            wallet_discovery_engine, 
+            ChainType
+        )
+        
+        all_candidates = []
+        
+        # Process each chain
+        for chain_str in request.chains:
+            try:
+                # Convert string to ChainType enum
+                chain = ChainType(chain_str)
+                
+                logger.info(f"Discovering traders on {chain_str}...")
+                
+                # Call the discovery engine
+                candidates = await wallet_discovery_engine.discover_top_traders(
+                    chain=chain,
+                    limit=request.limit,
+                    min_volume_usd=request.min_volume_usd,
+                    days_back=request.days_back
+                )
+                
+                all_candidates.extend(candidates)
+                logger.info(f"Found {len(candidates)} candidates on {chain_str}")
+                
+            except ValueError as e:
+                logger.error(f"Invalid chain type '{chain_str}': {e}")
+                continue
+            except Exception as e:
+                logger.error(f"Error discovering traders on {chain_str}: {e}")
+                continue
+        
+        # Convert WalletCandidate objects to dict format for frontend
+        result = []
+        for candidate in all_candidates:
+            try:
+                # Build dict from candidate attributes
+                trader_dict = {
+                    "address": candidate.address,
+                    "wallet_address": candidate.address,  # Alias for compatibility
+                    "chain": candidate.chain.value if hasattr(candidate.chain, 'value') else str(candidate.chain),
+                    "quality_score": float(candidate.quality_score) if hasattr(candidate, 'quality_score') else 0,
+                    "confidence_score": float(candidate.confidence_score) if hasattr(candidate, 'confidence_score') else 0,
+                    "win_rate": float(candidate.win_rate) if hasattr(candidate, 'win_rate') else 0,
+                    "total_trades": int(candidate.total_trades) if hasattr(candidate, 'total_trades') else 0,
+                    "total_volume_usd": float(candidate.total_volume_usd) if hasattr(candidate, 'total_volume_usd') else 0,
+                    "avg_trade_size_usd": float(candidate.avg_trade_size_usd) if hasattr(candidate, 'avg_trade_size_usd') else 0,
+                    "profitable_trades": int(candidate.profitable_trades) if hasattr(candidate, 'profitable_trades') else 0,
+                    "risk_score": float(candidate.risk_score) if hasattr(candidate, 'risk_score') else 0,
+                    "discovery_reason": candidate.discovery_reason if hasattr(candidate, 'discovery_reason') else "Volume Analysis",
+                    "discovered_at": candidate.discovered_at.isoformat() if hasattr(candidate, 'discovered_at') else datetime.now(timezone.utc).isoformat()
+                }
+                
+                # Add auto-add recommendation if score is high enough
+                if trader_dict["quality_score"] >= request.auto_add_threshold:
+                    trader_dict["auto_add_recommended"] = True
+                else:
+                    trader_dict["auto_add_recommended"] = False
+                
+                result.append(trader_dict)
+                
+            except Exception as e:
+                logger.error(f"Error converting candidate to dict: {e}")
+                continue
+        
+        logger.info(f"Discovered {len(result)} total traders across all chains")
+        
+        # Sort by quality score descending
+        result.sort(key=lambda x: x.get('quality_score', 0), reverse=True)
+        
+        # Return top traders up to the limit
+        return result[:request.limit]
+        
+    except ImportError as e:
+        logger.error(f"Failed to import wallet discovery engine: {e}")
+        # Return empty list if discovery engine not available
+        return []
+    except Exception as e:
+        logger.error(f"Unexpected error in discover_traders_real: {e}")
+        return []
+
+
+# ============================================================================
 # API Endpoints
 # ============================================================================
 
@@ -302,3 +411,26 @@ async def check_database_status() -> Dict[str, Any]:
     """Check if the database tables exist and are accessible."""
     
     return await check_database_tables()
+
+
+@router.post("/discover-traders", summary="Discover profitable traders")
+async def discover_traders_endpoint(request: DiscoveryRequest) -> Dict[str, Any]:
+    """
+    Discover profitable traders across specified chains.
+    Uses the wallet discovery engine to find real traders.
+    """
+    
+    try:
+        discovered_traders = await discover_traders_real(request)
+        
+        return {
+            "status": "ok",
+            "source": "wallet_discovery_engine",
+            "discovered_traders": discovered_traders,
+            "count": len(discovered_traders),
+            "request_params": request.dict()
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to discover traders: {e}")
+        raise HTTPException(500, f"Failed to discover traders: {str(e)}") from e
