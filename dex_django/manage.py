@@ -6,7 +6,10 @@ import sys
 
 def main():
     """Run administrative tasks."""
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.dex_django.settings')
+    # Add the parent directory to Python path so 'apps' can be imported
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dex_django.settings')
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:

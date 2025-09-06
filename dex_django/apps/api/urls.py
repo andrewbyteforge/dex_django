@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+
+# Import only the views that actually exist in your directory
 from .views import index, health
 from .views_api_v1 import (
     ping,
@@ -19,14 +21,6 @@ from .views_paper import (
     paper_toggle,
     paper_metrics,
     paper_thought_log_test,
-)
-from .views_discovery import (
-    discovery_status,
-    discovery_start,
-    discovery_stop,
-    discovery_config,
-    recent_discoveries,
-    force_discovery_scan,
 )
 from .views_live_opportunities import (
     live_opportunities,
@@ -78,13 +72,8 @@ urlpatterns = [
     path("api/v1/metrics/paper", paper_metrics, name="paper-metrics"),
     path("api/v1/paper/thought-log/test", paper_thought_log_test, name="paper-thought-log-test"),
     
-    # Discovery endpoints
-    path("api/v1/discovery/scan", force_discovery_scan, name="force-discovery-scan"),
-    path("api/v1/discovery/status", discovery_status, name="discovery-status"),
-    path("api/v1/discovery/start", discovery_start, name="discovery-start"),
-    path("api/v1/discovery/stop", discovery_stop, name="discovery-stop"),
-    path("api/v1/discovery/config", discovery_config, name="discovery-config"),
-    path("api/v1/discovery/recent", recent_discoveries, name="recent-discoveries"),
+    # NOTE: Discovery endpoints removed since views_discovery.py doesn't exist
+    # You can add them back when you create the views_discovery.py file
     
     # Live Opportunities endpoints
     path("api/v1/opportunities/live", live_opportunities, name="live-opportunities"),
@@ -98,9 +87,8 @@ urlpatterns = [
     path("api/v1/chains", supported_chains, name="supported-chains"),
     
     # DRF router endpoints (includes ping and CRUD)
-    path("api/v1/", include((router_v1.urls + [
-        path("ping", ping, name="ping")
-    ], "api_v1"), namespace="api_v1")),
+    path("api/v1/", include(router_v1.urls)),
+    path("api/v1/ping", ping, name="ping"),
 ]
 
 # Add intelligence endpoints if available

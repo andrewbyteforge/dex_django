@@ -22,6 +22,6 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path("", include("apps.api.urls")),  # routes /health
     path("favicon.ico", favicon),  # ← stops the 404s
-    path('api/v1/copy-trading/', include('apps.api.copy_trading_urls')),
+    # Removed: path('api/v1/copy-trading/', include('apps.api.copy_trading_urls')),
     path('api/v1/', include('apps.api.urls_copy')),
 ]
