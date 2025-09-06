@@ -209,7 +209,7 @@ class TransactionAnalyzer:
         self,
         pair_address: str,
         chain: str,
-        hours_back: int = 24,
+        hours_back: int = 12,
         min_trades: int = 3
     ) -> AnalysisResult:
         """
@@ -656,11 +656,15 @@ class TransactionAnalyzer:
             )
             
             # Calculate confidence score
+            avg_trade_usd = avg_trade_size * 2000  # existing approx conversion
+
             confidence_score = self._calculate_confidence_score(
                 trades_count,
                 win_rate,
-                float(total_gas_spent)
+                float(total_gas_spent),
+                avg_trade_usd
             )
+
             
             # Get last trade timestamp
             last_tx = transactions[0] if transactions else None
@@ -827,35 +831,51 @@ class TransactionAnalyzer:
         self,
         trades_count: int,
         win_rate: float,
-        gas_spent: float
+        gas_spent: float,
+        avg_trade_size_usd: float
     ) -> float:
-        """Calculate confidence score for a trader (0-100)."""
-        
+        """
+        Enhanced confidence score calculation (0-100).
+        Takes into account trade count, win rate, gas used, and avg trade size.
+        """
+
         score = 0.0
-        
-        # Trade frequency component (max 30 points)
+
+        # 🎯 Trade count (max 30)
         if trades_count >= 20:
             score += 30
         elif trades_count >= 10:
             score += 20
         elif trades_count >= 5:
             score += 10
-        
-        # Win rate component (max 50 points)
-        if win_rate >= 70:
-            score += 50
-        elif win_rate >= 60:
-            score += 35
-        elif win_rate >= 55:
-            score += 20
-        
-        # Activity component (max 20 points)
-        if gas_spent > 0.1:
-            score += 20
-        elif gas_spent > 0.05:
+
+        # 📈 Win rate (max 40, scaled linearly from 50% to 100%)
+        if win_rate >= 50:
+            scaled_score = min((win_rate - 50) * 0.8, 40)
+            score += scaled_score
+
+        # ⛽ Gas activity (max 10)
+        if gas_spent >= 0.1:
             score += 10
-        
-        return min(score, 100.0)
+        elif gas_spent >= 0.05:
+            score += 5
+
+        # 💵 Trade size (max 20)
+        if avg_trade_size_usd >= 2000:
+            score += 20
+        elif avg_trade_size_usd >= 1000:
+            score += 10
+        elif avg_trade_size_usd >= 500:
+            score += 5
+
+        return round(min(score, 100), 1)
+
+    
+
+
+
+
+
     
     async def _rate_limit(self, chain: str):
         """Implement rate limiting per chain."""
@@ -905,15 +925,29 @@ class TransactionAnalyzer:
         logger.info("🧪 RUNNING TRANSACTION ANALYZER TEST")
         logger.info("=" * 60)
         
+
+        ##############################################################
         # Real mainnet pair addresses for testing (high-volume pools)
-        # These are actual deployed contracts, not mock addresses
+        # ROUTER CONTRACTS
+        ##############################################################
         test_pairs = {
-            "ethereum": "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",  # Uniswap V2 Router
-            "bsc": "0x10ED43C718714eb63d5aA57B78B54704E256024E",       # PancakeSwap Router
-            "base": "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24",      # BaseSwap Router  
-            "polygon": "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff",   # QuickSwap Router
-            "arbitrum": "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506",  # SushiSwap Router
-            "optimism": "0x4200000000000000000000000000000000000006"   # WETH (very active)
+            # ✅ Uniswap V3 Router – Ethereum
+            "ethereum": "0xe592427a0aece92de3edee1f18e0157c05861564",
+
+            # ✅ PancakeSwap V2 Router – BSC
+            "bsc": "0x10ED43C718714eb63d5aA57B78B54704E256024E",
+
+            # ✅ BaseSwap Router – Base (you can confirm if you're using BaseSwap)
+            "base": "0x327Df1E6de05895d2ab08513aaDD9313Fe505d86",  # BaseSwap V2 Router
+
+            # ✅ QuickSwap Router – Polygon
+            "polygon": "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff",
+
+            # ✅ Uniswap V3 Router – Arbitrum
+            "arbitrum": "0xe592427a0aece92de3edee1f18e0157c05861564",
+
+            # ✅ Uniswap V3 Router – Optimism
+            "optimism": "0xe592427a0aece92de3edee1f18e0157c05861564",
         }
         
         test_results = {}
