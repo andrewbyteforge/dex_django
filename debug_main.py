@@ -41,6 +41,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger("debug_main")
 
+
+
+
+# Import the routers
+try:
+    from dex_django.apps.api.debug_routers import health_router, api_router
+    logger.info("✅ Successfully imported debug_routers")
+except ImportError as e:
+    logger.error(f"❌ Failed to import debug_routers: {e}")
+    # Create fallback routers
+    health_router = APIRouter(prefix="/health", tags=["health"])
+    api_router = APIRouter(prefix="/api/v1", tags=["debug-api"])
+
+# CREATE THE MISSING DISCOVERY ROUTER
+discovery_router = APIRouter(prefix="/api/v1", tags=["discovery"])
+
+
+
 def load_environment_variables():
     """Load environment variables from .env file."""
     try:
